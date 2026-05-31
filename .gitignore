@@ -1,0 +1,7 @@
+docs/*
+graphify-out/*
+node_modules/*
+AGENTS.md
+CLAUDE.md
+Makefile
+scripts/*
