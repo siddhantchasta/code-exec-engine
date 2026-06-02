@@ -7,10 +7,14 @@
     "api": "node api/index.js",
     "worker": "node worker/index.js",
     "test:gate": "node test-executor.js",
-    "test:stage2": "node test-stage-2.js"
+    "test:stage2": "node test-stage-2.js",
+    "test:stage3": "node test-stage-3.js",
+    "test:stage4": "node test-stage-4.js"
   },
   "dependencies": {
     "dockerode": "^4.0.4",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.2",
     "ioredis": "^5.11.0",
     "pg": "^8.21.0",
     "pino": "^9.6.0",
