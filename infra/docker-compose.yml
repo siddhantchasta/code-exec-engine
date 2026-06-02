@@ -1,0 +1,25 @@
+## Docker Compose — Backing services only (Redis + PostgreSQL)
+## Usage: cd infra && docker-compose up -d
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6380:6379'
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - '5434:5432'
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: code_exec
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../docs/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    restart: unless-stopped
+
+volumes:
+  pgdata:
