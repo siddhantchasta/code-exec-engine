@@ -6,3 +6,4 @@ CLAUDE.md
 Makefile
 scripts/*
 .env
+.agents

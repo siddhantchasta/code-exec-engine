@@ -24,6 +24,9 @@ const app = express();
 
 app.use(express.json());
 
+// Serve demo UI from public/ — before auth so HTML loads without API key
+app.use(express.static('public'));
+
 // Auth — single API key check on all routes
 app.use((req, res, next) => {
   if (req.headers['x-api-key'] !== config.API_KEY) {

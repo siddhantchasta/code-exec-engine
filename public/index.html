@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Sandboxed Python code execution engine — run Python snippets safely in Docker containers with 8 kernel-enforced security constraints.">
+  <title>Sandboxed Code Execution Engine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    /* ================================================================
+       Design System — Tokens
+       ================================================================ */
+    :root {
+      /* Palette — deep navy / electric accents */
+      --bg-primary:    #0a0e1a;
+      --bg-secondary:  #111827;
+      --bg-surface:    #1a2035;
+      --bg-elevated:   #222b45;
+      --bg-glass:      rgba(26, 32, 53, 0.65);
+
+      --text-primary:  #e2e8f0;
+      --text-secondary:#94a3b8;
+      --text-muted:    #64748b;
+
+      --accent:        #6366f1;  /* Indigo */
+      --accent-hover:  #818cf8;
+      --accent-glow:   rgba(99, 102, 241, 0.35);
+
+      --green:         #34d399;
+      --green-dim:     rgba(52, 211, 153, 0.12);
+      --red:           #f87171;
+      --red-dim:       rgba(248, 113, 113, 0.12);
+      --yellow:        #fbbf24;
+      --yellow-dim:    rgba(251, 191, 36, 0.12);
+      --cyan:          #22d3ee;
+
+      --border:        rgba(148, 163, 184, 0.1);
+      --border-focus:  rgba(99, 102, 241, 0.5);
+
+      --radius-sm:     6px;
+      --radius-md:     10px;
+      --radius-lg:     16px;
+
+      --font-sans:     'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono:     'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+      --shadow-lg:     0 8px 32px rgba(0, 0, 0, 0.4);
+      --shadow-glow:   0 0 24px var(--accent-glow);
+
+      --transition:    0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* ================================================================
+       Reset & Base
+       ================================================================ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.6;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Ambient background gradient */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 20% 10%, rgba(99, 102, 241, 0.08) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 50% at 80% 80%, rgba(34, 211, 238, 0.06) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ================================================================
+       Layout
+       ================================================================ */
+    .app {
+      position: relative;
+      z-index: 1;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 24px 20px 48px;
+    }
+
+    /* ================================================================
+       Settings Bar
+       ================================================================ */
+    .settings-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 24px;
+      padding: 10px 16px;
+      background: var(--bg-glass);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+    }
+
+    .settings-bar label {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+    }
+
+    .settings-bar input {
+      flex: 1;
+      min-width: 0;
+      padding: 6px 10px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-secondary);
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      outline: none;
+      transition: border-color var(--transition);
+    }
+
+    .settings-bar input:focus {
+      border-color: var(--border-focus);
+    }
+
+    .lock-icon {
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    /* ================================================================
+       Header
+       ================================================================ */
+    .header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+
+    .header h1 {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent-hover) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .header p {
+      margin-top: 6px;
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .header .tag-row {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 10px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+    }
+
+    .tag .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+
+    .tag .dot.docker    { background: #2496ED; }
+    .tag .dot.redis     { background: #DC382D; }
+    .tag .dot.postgres  { background: #4169E1; }
+    .tag .dot.python    { background: #3776AB; }
+
+    /* ================================================================
+       Editor Panel
+       ================================================================ */
+    .editor-panel {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-lg);
+      transition: box-shadow var(--transition);
+    }
+
+    .editor-panel:focus-within {
+      box-shadow: var(--shadow-lg), var(--shadow-glow);
+    }
+
+    .editor-titlebar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .editor-titlebar .dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .editor-titlebar .dots span {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .editor-titlebar .dots span:nth-child(1) { background: #ff5f57; }
+    .editor-titlebar .dots span:nth-child(2) { background: #febc2e; }
+    .editor-titlebar .dots span:nth-child(3) { background: #28c840; }
+
+    .editor-titlebar .filename {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .editor-titlebar .lang-badge {
+      font-size: 11px;
+      font-weight: 600;
+      color: #3776AB;
+      background: rgba(55, 118, 171, 0.12);
+      padding: 2px 8px;
+      border-radius: var(--radius-sm);
+    }
+
+    #code-editor {
+      display: block;
+      width: 100%;
+      min-height: 220px;
+      padding: 16px;
+      font-family: var(--font-mono);
+      font-size: 14px;
+      line-height: 1.7;
+      color: var(--text-primary);
+      background: transparent;
+      border: none;
+      resize: vertical;
+      outline: none;
+      tab-size: 4;
+    }
+
+    #code-editor::placeholder {
+      color: var(--text-muted);
+      opacity: 0.5;
+    }
+
+    /* ================================================================
+       Action Bar
+       ================================================================ */
+    .action-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .char-count {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+
+    #submit-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 28px;
+      font-family: var(--font-sans);
+      font-size: 14px;
+      font-weight: 600;
+      color: #fff;
+      background: linear-gradient(135deg, var(--accent) 0%, #8b5cf6 100%);
+      border: none;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: all var(--transition);
+      position: relative;
+      overflow: hidden;
+    }
+
+    #submit-btn:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 16px var(--accent-glow);
+    }
+
+    #submit-btn:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    #submit-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    #submit-btn .spinner {
+      display: none;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    #submit-btn.loading .spinner { display: inline-block; }
+    #submit-btn.loading .btn-text { display: none; }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Pulse animation while waiting */
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 8px var(--accent-glow); }
+      50%      { box-shadow: 0 0 24px var(--accent-glow), 0 0 48px rgba(99,102,241,0.15); }
+    }
+
+    #submit-btn.loading {
+      animation: pulse-glow 1.8s ease-in-out infinite;
+    }
+
+    /* ================================================================
+       Status Section
+       ================================================================ */
+    .status-section {
+      margin-top: 24px;
+      display: none;
+    }
+
+    .status-section.visible { display: block; }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      background: var(--bg-glass);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-radius: 999px;
+      transition: all 0.4s ease;
+    }
+
+    .status-badge .pulse-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      animation: pulse-dot 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: 0.4; transform: scale(0.7); }
+    }
+
+    .status-badge.pending  { color: var(--yellow); background: var(--yellow-dim); }
+    .status-badge.pending .pulse-dot  { background: var(--yellow); }
+
+    .status-badge.running  { color: var(--cyan);   background: rgba(34,211,238,0.12); }
+    .status-badge.running .pulse-dot  { background: var(--cyan); }
+
+    .status-badge.done     { color: var(--green);  background: var(--green-dim); }
+    .status-badge.done .pulse-dot     { display: none; }
+
+    .status-badge.failed,
+    .status-badge.timeout  { color: var(--red);    background: var(--red-dim); }
+    .status-badge.failed .pulse-dot,
+    .status-badge.timeout .pulse-dot  { display: none; }
+
+    .status-id {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .status-timer {
+      margin-left: auto;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* ================================================================
+       Result Panel
+       ================================================================ */
+    .result-panel {
+      margin-top: 16px;
+      display: none;
+      animation: slide-in 0.35s ease-out;
+    }
+
+    .result-panel.visible { display: block; }
+
+    @keyframes slide-in {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .result-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-lg);
+    }
+
+    .result-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .result-header span {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+
+    .result-meta {
+      display: flex;
+      gap: 16px;
+    }
+
+    .meta-item {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    .meta-item .meta-label {
+      color: var(--text-muted);
+    }
+
+    .output-block {
+      position: relative;
+    }
+
+    .output-label {
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      opacity: 0.6;
+    }
+
+    .output-block pre {
+      padding: 16px;
+      padding-right: 60px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-all;
+      min-height: 48px;
+      margin: 0;
+    }
+
+    .output-block.stdout pre {
+      color: var(--green);
+      background: var(--green-dim);
+    }
+
+    .output-block.stderr pre {
+      color: var(--red);
+      background: var(--red-dim);
+      border-top: 1px solid var(--border);
+    }
+
+    .output-block.empty pre {
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    /* ================================================================
+       Error Toast
+       ================================================================ */
+    .error-toast {
+      margin-top: 16px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: var(--red);
+      background: var(--red-dim);
+      border: 1px solid rgba(248, 113, 113, 0.2);
+      border-radius: var(--radius-md);
+      display: none;
+      animation: slide-in 0.25s ease-out;
+    }
+
+    .error-toast.visible { display: block; }
+
+    .error-toast code {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      padding: 1px 5px;
+      background: rgba(248, 113, 113, 0.1);
+      border-radius: 3px;
+    }
+
+    /* ================================================================
+       Footer
+       ================================================================ */
+    .footer {
+      text-align: center;
+      margin-top: 48px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .footer a {
+      color: var(--accent-hover);
+      text-decoration: none;
+      transition: color var(--transition);
+    }
+
+    .footer a:hover {
+      color: var(--accent);
+    }
+
+    /* ================================================================
+       Responsive
+       ================================================================ */
+    @media (max-width: 600px) {
+      .app { padding: 16px 12px 32px; }
+      .header h1 { font-size: 22px; }
+      .action-bar { flex-direction: column-reverse; align-items: stretch; }
+      #submit-btn { justify-content: center; }
+      .status-row { flex-wrap: wrap; }
+      .status-timer { margin-left: 0; }
+      .result-meta { flex-wrap: wrap; gap: 8px; }
+      .settings-bar { flex-wrap: wrap; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- Settings Bar — API Key -->
+    <div class="settings-bar">
+      <span class="lock-icon">🔑</span>
+      <label for="api-key-input">API Key</label>
+      <input type="text" id="api-key-input" value="test-api-key-dev-only" spellcheck="false" autocomplete="off">
+    </div>
+
+    <!-- Header -->
+    <header class="header">
+      <h1>Sandboxed Code Execution Engine</h1>
+      <p>Run Python snippets safely in Docker containers with 8 kernel-enforced security constraints</p>
+      <div class="tag-row">
+        <span class="tag"><span class="dot docker"></span> Docker</span>
+        <span class="tag"><span class="dot redis"></span> Redis</span>
+        <span class="tag"><span class="dot postgres"></span> PostgreSQL</span>
+        <span class="tag"><span class="dot python"></span> Python 3.12</span>
+      </div>
+    </header>
+
+    <!-- Code Editor -->
+    <div class="editor-panel">
+      <div class="editor-titlebar">
+        <div class="dots"><span></span><span></span><span></span></div>
+        <span class="filename">snippet.py</span>
+        <span class="lang-badge">Python</span>
+      </div>
+      <textarea
+        id="code-editor"
+        placeholder="# Write your Python code here&#10;print('hello world')"
+        spellcheck="false"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+      ></textarea>
+    </div>
+
+    <!-- Action Bar -->
+    <div class="action-bar">
+      <span class="char-count" id="char-count">0 / 10,000</span>
+      <button id="submit-btn" type="button">
+        <span class="btn-text">▶ Run Code</span>
+        <span class="spinner"></span>
+      </button>
+    </div>
+
+    <!-- Status Section -->
+    <div class="status-section" id="status-section">
+      <div class="status-row">
+        <span class="status-badge" id="status-badge">
+          <span class="pulse-dot"></span>
+          <span class="status-text">pending</span>
+        </span>
+        <span class="status-id" id="status-id"></span>
+        <span class="status-timer" id="status-timer"></span>
+      </div>
+    </div>
+
+    <!-- Error Toast -->
+    <div class="error-toast" id="error-toast"></div>
+
+    <!-- Result Panel -->
+    <div class="result-panel" id="result-panel">
+      <div class="result-card">
+        <div class="result-header">
+          <span>Execution Result</span>
+          <div class="result-meta" id="result-meta"></div>
+        </div>
+        <div class="output-block stdout" id="stdout-block">
+          <span class="output-label">stdout</span>
+          <pre id="stdout-output"></pre>
+        </div>
+        <div class="output-block stderr" id="stderr-block">
+          <span class="output-label">stderr</span>
+          <pre id="stderr-output"></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      Sandboxed Code Execution Engine &middot; Built with Node.js, Docker, Redis &amp; PostgreSQL
+    </footer>
+  </div>
+
+  <script>
+    // ================================================================
+    // DOM References
+    // ================================================================
+    const codeEditor    = document.getElementById('code-editor');
+    const charCount     = document.getElementById('char-count');
+    const submitBtn     = document.getElementById('submit-btn');
+    const apiKeyInput   = document.getElementById('api-key-input');
+    const statusSection = document.getElementById('status-section');
+    const statusBadge   = document.getElementById('status-badge');
+    const statusText    = statusBadge.querySelector('.status-text');
+    const statusId      = document.getElementById('status-id');
+    const statusTimer   = document.getElementById('status-timer');
+    const errorToast    = document.getElementById('error-toast');
+    const resultPanel   = document.getElementById('result-panel');
+    const resultMeta    = document.getElementById('result-meta');
+    const stdoutOutput  = document.getElementById('stdout-output');
+    const stderrOutput  = document.getElementById('stderr-output');
+    const stdoutBlock   = document.getElementById('stdout-block');
+    const stderrBlock   = document.getElementById('stderr-block');
+
+    // ================================================================
+    // State
+    // ================================================================
+    let pollInterval = null;
+    let timerInterval = null;
+    let startTime = null;
+
+    // ================================================================
+    // Character Counter
+    // ================================================================
+    codeEditor.addEventListener('input', () => {
+      const len = codeEditor.value.length;
+      charCount.textContent = `${len.toLocaleString()} / 10,000`;
+    });
+
+    // ================================================================
+    // Tab Key Support in Textarea
+    // ================================================================
+    codeEditor.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const start = codeEditor.selectionStart;
+        const end = codeEditor.selectionEnd;
+        codeEditor.value = codeEditor.value.substring(0, start) + '    ' + codeEditor.value.substring(end);
+        codeEditor.selectionStart = codeEditor.selectionEnd = start + 4;
+      }
+    });
+
+    // ================================================================
+    // Helpers
+    // ================================================================
+
+    /** @returns {string} */
+    function getApiKey() {
+      return apiKeyInput.value.trim();
+    }
+
+    /**
+     * @param {string} message
+     * @returns {void}
+     */
+    function showError(message) {
+      errorToast.innerHTML = message;
+      errorToast.classList.add('visible');
+    }
+
+    /** @returns {void} */
+    function hideError() {
+      errorToast.classList.remove('visible');
+      errorToast.innerHTML = '';
+    }
+
+    /**
+     * @param {string} status
+     * @returns {void}
+     */
+    function setStatus(status) {
+      statusBadge.className = 'status-badge ' + status;
+      statusText.textContent = status;
+    }
+
+    /** @returns {void} */
+    function startTimer() {
+      startTime = Date.now();
+      timerInterval = setInterval(() => {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        statusTimer.textContent = elapsed + 's';
+      }, 100);
+    }
+
+    /** @returns {void} */
+    function stopTimer() {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+    }
+
+    /**
+     * @param {string} url
+     * @param {RequestInit} [options]
+     * @returns {Promise<Response>}
+     */
+    async function apiFetch(url, options) {
+      const key = getApiKey();
+      const headers = { ...(options && options.headers ? options.headers : {}), 'x-api-key': key };
+      return fetch(url, { ...options, headers });
+    }
+
+    // ================================================================
+    // Submit Flow
+    // ================================================================
+    submitBtn.addEventListener('click', async () => {
+      const code = codeEditor.value;
+
+      // Validation
+      if (!code.trim()) {
+        showError('Please enter some Python code to run.');
+        return;
+      }
+      if (code.length > 10000) {
+        showError('Code exceeds the 10,000 character limit.');
+        return;
+      }
+      if (!getApiKey()) {
+        showError('API key is required. Enter it in the field above.');
+        return;
+      }
+
+      // Reset UI
+      hideError();
+      resultPanel.classList.remove('visible');
+      statusSection.classList.add('visible');
+      setStatus('pending');
+      statusId.textContent = '';
+      statusTimer.textContent = '0.0s';
+      submitBtn.classList.add('loading');
+      submitBtn.disabled = true;
+
+      startTimer();
+
+      try {
+        // POST /submit
+        const submitRes = await apiFetch('/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, language: 'python' }),
+        });
+
+        if (!submitRes.ok) {
+          const body = await submitRes.json().catch(() => null);
+          if (submitRes.status === 401) {
+            throw new Error('Unauthorized — check your API key.');
+          } else if (submitRes.status === 429) {
+            throw new Error('Rate limit exceeded — wait a moment and try again.');
+          } else if (submitRes.status === 400) {
+            const details = body && body.details ? JSON.stringify(body.details) : (body && body.error ? body.error : 'Bad request');
+            throw new Error('Validation error: ' + details);
+          } else {
+            throw new Error('Server error (' + submitRes.status + '): ' + (body && body.error ? body.error : 'Unknown'));
+          }
+        }
+
+        const submitData = await submitRes.json();
+        const jobId = submitData.id;
+        statusId.textContent = jobId;
+
+        // Poll /status/:id every 2 seconds
+        pollInterval = setInterval(async () => {
+          try {
+            const pollRes = await apiFetch('/status/' + jobId);
+            if (!pollRes.ok) {
+              throw new Error('Status poll failed (' + pollRes.status + ')');
+            }
+            const pollData = await pollRes.json();
+            setStatus(pollData.status);
+
+            // Terminal states: done, failed, timeout
+            if (pollData.status === 'done' || pollData.status === 'failed' || pollData.status === 'timeout') {
+              clearInterval(pollInterval);
+              pollInterval = null;
+              stopTimer();
+              submitBtn.classList.remove('loading');
+              submitBtn.disabled = false;
+              await fetchResult(jobId);
+            }
+          } catch (/** @type {unknown} */ err) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+            stopTimer();
+            submitBtn.classList.remove('loading');
+            submitBtn.disabled = false;
+            showError('Polling error: ' + (err instanceof Error ? err.message : String(err)));
+          }
+        }, 2000);
+
+      } catch (/** @type {unknown} */ err) {
+        stopTimer();
+        submitBtn.classList.remove('loading');
+        submitBtn.disabled = false;
+        showError(err instanceof Error ? err.message : String(err));
+      }
+    });
+
+    // ================================================================
+    // Fetch Result
+    // ================================================================
+
+    /**
+     * @param {string} jobId
+     * @returns {Promise<void>}
+     */
+    async function fetchResult(jobId) {
+      try {
+        const resultRes = await apiFetch('/result/' + jobId);
+        if (!resultRes.ok) {
+          if (resultRes.status === 404) {
+            showError('Result not found — the job may have failed without producing output.');
+            return;
+          }
+          throw new Error('Failed to fetch result (' + resultRes.status + ')');
+        }
+
+        const data = await resultRes.json();
+
+        // Metadata
+        const metaParts = [];
+        metaParts.push('<span class="meta-item"><span class="meta-label">exit: </span>' + escapeHtml(String(data.exitCode)) + '</span>');
+        metaParts.push('<span class="meta-item"><span class="meta-label">time: </span>' + escapeHtml(String(data.runtimeMs)) + 'ms</span>');
+        if (data.timedOut) {
+          metaParts.push('<span class="meta-item" style="color:var(--red)">⏱ timed out</span>');
+        }
+        resultMeta.innerHTML = metaParts.join('');
+
+        // Stdout
+        if (data.stdout && data.stdout.trim()) {
+          stdoutOutput.textContent = data.stdout;
+          stdoutBlock.classList.remove('empty');
+        } else {
+          stdoutOutput.textContent = '(no output)';
+          stdoutBlock.classList.add('empty');
+        }
+
+        // Stderr
+        if (data.stderr && data.stderr.trim()) {
+          stderrOutput.textContent = data.stderr;
+          stderrBlock.classList.remove('empty');
+          stderrBlock.style.display = 'block';
+        } else {
+          stderrBlock.style.display = 'none';
+        }
+
+        resultPanel.classList.add('visible');
+
+      } catch (/** @type {unknown} */ err) {
+        showError('Error fetching result: ' + (err instanceof Error ? err.message : String(err)));
+      }
+    }
+
+    // ================================================================
+    // Utilities
+    // ================================================================
+
+    /**
+     * @param {string} str
+     * @returns {string}
+     */
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
