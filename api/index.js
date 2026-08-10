@@ -7,6 +7,8 @@ const { createRateLimiter } = require('./middleware/rate-limit');
 const submitRoute = require('./routes/submit');
 const statusRoute = require('./routes/status');
 const resultRoute = require('./routes/result');
+const redis = require('../lib/redis');
+const { attachWebSocket } = require('./websocket');
 
 // ---------------------------------------------------------------------------
 // Express 4 API Server
@@ -66,8 +68,10 @@ app.use(errorHandler);
 // Start
 // ---------------------------------------------------------------------------
 
-app.listen(config.PORT, () => {
+const server = app.listen(config.PORT, () => {
   logger.info({ port: config.PORT }, 'api server started');
 });
+
+attachWebSocket(server, redis);
 
 module.exports = app; // exported for testing

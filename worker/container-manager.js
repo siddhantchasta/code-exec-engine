@@ -6,6 +6,11 @@ const { getLanguage } = require('../lib/languages');
 
 const docker = new Docker();
 
+/** @param {string} output @returns {string} */
+function normalizeTtyOutput(output) {
+  return output.replace(/\r\n/g, '\n');
+}
+
 // ---------------------------------------------------------------------------
 // Container lifecycle: create → start → wait → kill → remove
 // ---------------------------------------------------------------------------
@@ -47,28 +52,77 @@ async function createContainer(hostCodePath, language) {
 
 /**
  * Run a command inside a running sandbox container and collect its output.
+ * A TTY is used for run phases so language runtimes flush output incrementally.
  *
  * @param {import('dockerode').Container} container
  * @param {string[]} command
+ * @param {{ tty?: boolean, onChunk?: (chunk: string, stream: 'stdout' | 'stderr') => void }} [options]
  * @returns {Promise<{ stdout: string, stderr: string, exitCode: number }>}
  */
-async function execInContainer(container, command) {
+async function execInContainer(container, command, options = {}) {
+  const useTty = options.tty ?? false;
   const exec = await container.exec({
     Cmd: command,
     AttachStdout: true,
     AttachStderr: true,
+    Tty: useTty,
   });
   const stream = await exec.start({ hijack: true, stdin: false });
   const chunks = [];
+  let pending = Buffer.alloc(0);
+  /** @type {boolean | undefined} */
+  let multiplexed;
+
+  /** @param {Buffer} data */
+  function publishFrames(data) {
+    pending = Buffer.concat([pending, data]);
+
+    if (multiplexed === undefined && pending.length >= 8) {
+      const declaredSize = pending.readUInt32BE(4);
+      multiplexed = (pending.readUInt8(0) === 1 || pending.readUInt8(0) === 2)
+        && pending.readUInt8(1) === 0
+        && pending.readUInt8(2) === 0
+        && pending.readUInt8(3) === 0
+        && declaredSize <= 16 * 1024 * 1024;
+    }
+
+    if (multiplexed === false) {
+      if (pending.length > 0 && options.onChunk) {
+        options.onChunk(normalizeTtyOutput(pending.toString('utf-8')), 'stdout');
+      }
+      pending = Buffer.alloc(0);
+      return;
+    }
+
+    while (multiplexed && pending.length >= 8) {
+      const streamType = pending.readUInt8(0);
+      const frameSize = pending.readUInt32BE(4);
+      if (pending.length < 8 + frameSize) return;
+      const payload = pending.subarray(8, 8 + frameSize);
+      if (options.onChunk) {
+        options.onChunk(
+          normalizeTtyOutput(payload.toString('utf-8')),
+          streamType === 2 ? 'stderr' : 'stdout',
+        );
+      }
+      pending = pending.subarray(8 + frameSize);
+    }
+  }
 
   await new Promise((resolve, reject) => {
-    stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+    stream.on('data', (chunk) => {
+      const buffer = Buffer.from(chunk);
+      chunks.push(buffer);
+      if (options.onChunk) publishFrames(buffer);
+    });
     stream.once('end', resolve);
     stream.once('error', reject);
   });
 
   const inspection = await exec.inspect();
-  const logs = demultiplexLogs(Buffer.concat(chunks));
+  const output = Buffer.concat(chunks);
+  const logs = demultiplexLogs(output);
+  if (useTty) logs.stdout = normalizeTtyOutput(logs.stdout);
   return { ...logs, exitCode: inspection.ExitCode ?? 1 };
 }
 

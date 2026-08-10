@@ -8,6 +8,8 @@ const executor = require('./executor');
 const config = require('../lib/config');
 
 const jobKey = (id) => `exec:job:${id}`;
+const resultKey = (id) => `exec:result:${id}`;
+const streamChannel = (id) => `exec:stream:${id}`;
 
 // ---------------------------------------------------------------------------
 // Single async worker loop
@@ -56,6 +58,24 @@ async function processJob(jobId, code, language) {
     await repository.insertResult(jobId, result);
     await repository.updateSubmissionStatus(jobId, finalStatus);
     await redis.hset(jobKey(jobId), 'status', finalStatus);
+    await redis.hset(
+      resultKey(jobId),
+      'status', finalStatus,
+      'stdout', result.stdout,
+      'stderr', result.stderr,
+      'compileStdout', result.compileStdout,
+      'compileStderr', result.compileStderr,
+      'exitCode', String(result.exitCode),
+      'runtimeMs', String(result.runtimeMs),
+      'timedOut', String(result.timedOut),
+    );
+    await redis.publish(
+      streamChannel(jobId),
+      JSON.stringify({
+        type: 'done',
+        result: { ...result, status: finalStatus },
+      }),
+    );
 
     logger.info(
       { submissionId: jobId, status: finalStatus, runtimeMs: result.runtimeMs },

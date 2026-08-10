@@ -8,6 +8,9 @@ const containerManager = require('./container-manager');
 const config = require('../lib/config');
 const { getLanguage } = require('../lib/languages');
 const logger = require('../lib/logger');
+const redis = require('../lib/redis');
+
+const streamChannel = (submissionId) => `exec:stream:${submissionId}`;
 
 /**
  * @typedef {Object} ExecutionResult
@@ -41,7 +44,19 @@ async function executePhase(container, command, timeoutMs, submissionId, phase) 
   }, timeoutMs);
 
   try {
-    const result = await containerManager.execInContainer(container, command);
+    const result = await containerManager.execInContainer(container, command, {
+      tty: phase === 'run',
+      onChunk: phase === 'run'
+        ? (chunk, stream) => {
+          redis.publish(
+            streamChannel(submissionId),
+            JSON.stringify({ type: 'output', stream, chunk }),
+          ).catch(/** @param {unknown} err */ (err) => {
+            logger.error({ submissionId, err }, 'failed to publish output chunk');
+          });
+        }
+        : undefined,
+    });
     return { ...result, timedOut };
   } catch (/** @type {unknown} */ err) {
     // A timeout kill can race Docker's exec startup/inspection and produce 409.

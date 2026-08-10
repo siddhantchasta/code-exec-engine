@@ -8,6 +8,7 @@
     "worker": "node worker/index.js",
     "test:gate": "node test-executor.js",
     "test:languages": "node test-languages.js",
+    "test:websocket": "node api/websocket.test.js",
     "test:stage2": "node test-stage-2.js",
     "test:stage3": "node test-stage-3.js",
     "test:stage4": "node test-stage-4.js"
@@ -19,6 +20,7 @@
     "ioredis": "^5.11.0",
     "pg": "^8.21.0",
     "pino": "^9.6.0",
+    "ws": "^8.18.3",
     "zod": "^3.24.0"
   },
   "devDependencies": {

@@ -697,6 +697,9 @@
     let pollInterval = null;
     let timerInterval = null;
     let startTime = null;
+    let outputSocket = null;
+    let activeJobId = null;
+    let jobCompleted = false;
 
     // ================================================================
     // Character Counter
@@ -780,6 +783,115 @@
       return fetch(url, { ...options, headers });
     }
 
+    /**
+     * @param {{ stdout?: string, stderr?: string, exitCode?: number, runtimeMs?: number, timedOut?: boolean }} data
+     * @returns {void}
+     */
+    function renderResult(data) {
+      const metaParts = [];
+      metaParts.push('<span class="meta-item"><span class="meta-label">exit: </span>' + escapeHtml(String(data.exitCode ?? '—')) + '</span>');
+      metaParts.push('<span class="meta-item"><span class="meta-label">time: </span>' + escapeHtml(String(data.runtimeMs ?? '—')) + 'ms</span>');
+      if (data.timedOut) {
+        metaParts.push('<span class="meta-item" style="color:var(--red)">⏱ timed out</span>');
+      }
+      resultMeta.innerHTML = metaParts.join('');
+
+      if (data.stdout && data.stdout.trim()) {
+        stdoutOutput.textContent = data.stdout;
+        stdoutBlock.classList.remove('empty');
+      } else {
+        stdoutOutput.textContent = '(no output)';
+        stdoutBlock.classList.add('empty');
+      }
+
+      if (data.stderr && data.stderr.trim()) {
+        stderrOutput.textContent = data.stderr;
+        stderrBlock.classList.remove('empty');
+        stderrBlock.style.display = 'block';
+      } else {
+        stderrBlock.style.display = 'none';
+      }
+
+      resultPanel.classList.add('visible');
+    }
+
+    /**
+     * @param {string} jobId
+     * @param {{ stdout?: string, stderr?: string, exitCode?: number, runtimeMs?: number, timedOut?: boolean }} [result]
+     * @returns {Promise<void>}
+     */
+    async function completeJob(jobId, result) {
+      if (jobCompleted || activeJobId !== jobId) return;
+      jobCompleted = true;
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+      stopTimer();
+      submitBtn.classList.remove('loading');
+      submitBtn.disabled = false;
+      if (outputSocket && outputSocket.readyState === WebSocket.OPEN) outputSocket.close();
+
+      if (result) {
+        renderResult(result);
+      } else {
+        await fetchResult(jobId);
+      }
+    }
+
+    /**
+     * @param {string} jobId
+     * @returns {void}
+     */
+    function openOutputSocket(jobId) {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const query = new URLSearchParams({ id: jobId, apiKey: getApiKey() });
+      outputSocket = new WebSocket(`${protocol}//${window.location.host}/ws?${query.toString()}`);
+
+      outputSocket.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === 'output' && message.stream === 'stdout') {
+            resultPanel.classList.add('visible');
+            stdoutOutput.textContent += message.chunk;
+            stdoutBlock.classList.remove('empty');
+            stderrBlock.style.display = 'none';
+          }
+          if (message.type === 'done') completeJob(jobId, message.result);
+        } catch (err) {
+          showError('Received an invalid live-output message. Polling will continue.');
+        }
+      };
+
+      outputSocket.onerror = () => {
+        // The established REST polling interval remains the fallback transport.
+      };
+    }
+
+    /**
+     * @param {string} jobId
+     * @returns {void}
+     */
+    function startStatusPolling(jobId) {
+      pollInterval = setInterval(async () => {
+        try {
+          const pollRes = await apiFetch('/status/' + jobId);
+          if (!pollRes.ok) throw new Error('Status poll failed (' + pollRes.status + ')');
+          const pollData = await pollRes.json();
+          setStatus(pollData.status);
+          if (pollData.status === 'done' || pollData.status === 'failed' || pollData.status === 'timeout') {
+            await completeJob(jobId);
+          }
+        } catch (err) {
+          if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+          }
+          if (!jobCompleted) showError('Polling error: ' + (err instanceof Error ? err.message : String(err)));
+        }
+      }, 2000);
+    }
+
     // ================================================================
     // Submit Flow
     // ================================================================
@@ -802,7 +914,12 @@
 
       // Reset UI
       hideError();
+      if (outputSocket) outputSocket.close();
+      activeJobId = null;
+      jobCompleted = false;
       resultPanel.classList.remove('visible');
+      stdoutOutput.textContent = '';
+      stderrOutput.textContent = '';
       statusSection.classList.add('visible');
       setStatus('pending');
       statusId.textContent = '';
@@ -836,36 +953,10 @@
 
         const submitData = await submitRes.json();
         const jobId = submitData.id;
+        activeJobId = jobId;
         statusId.textContent = jobId;
-
-        // Poll /status/:id every 2 seconds
-        pollInterval = setInterval(async () => {
-          try {
-            const pollRes = await apiFetch('/status/' + jobId);
-            if (!pollRes.ok) {
-              throw new Error('Status poll failed (' + pollRes.status + ')');
-            }
-            const pollData = await pollRes.json();
-            setStatus(pollData.status);
-
-            // Terminal states: done, failed, timeout
-            if (pollData.status === 'done' || pollData.status === 'failed' || pollData.status === 'timeout') {
-              clearInterval(pollInterval);
-              pollInterval = null;
-              stopTimer();
-              submitBtn.classList.remove('loading');
-              submitBtn.disabled = false;
-              await fetchResult(jobId);
-            }
-          } catch (/** @type {unknown} */ err) {
-            clearInterval(pollInterval);
-            pollInterval = null;
-            stopTimer();
-            submitBtn.classList.remove('loading');
-            submitBtn.disabled = false;
-            showError('Polling error: ' + (err instanceof Error ? err.message : String(err)));
-          }
-        }, 2000);
+        openOutputSocket(jobId);
+        startStatusPolling(jobId);
 
       } catch (/** @type {unknown} */ err) {
         stopTimer();
@@ -896,34 +987,7 @@
 
         const data = await resultRes.json();
 
-        // Metadata
-        const metaParts = [];
-        metaParts.push('<span class="meta-item"><span class="meta-label">exit: </span>' + escapeHtml(String(data.exitCode)) + '</span>');
-        metaParts.push('<span class="meta-item"><span class="meta-label">time: </span>' + escapeHtml(String(data.runtimeMs)) + 'ms</span>');
-        if (data.timedOut) {
-          metaParts.push('<span class="meta-item" style="color:var(--red)">⏱ timed out</span>');
-        }
-        resultMeta.innerHTML = metaParts.join('');
-
-        // Stdout
-        if (data.stdout && data.stdout.trim()) {
-          stdoutOutput.textContent = data.stdout;
-          stdoutBlock.classList.remove('empty');
-        } else {
-          stdoutOutput.textContent = '(no output)';
-          stdoutBlock.classList.add('empty');
-        }
-
-        // Stderr
-        if (data.stderr && data.stderr.trim()) {
-          stderrOutput.textContent = data.stderr;
-          stderrBlock.classList.remove('empty');
-          stderrBlock.style.display = 'block';
-        } else {
-          stderrBlock.style.display = 'none';
-        }
-
-        resultPanel.classList.add('visible');
+        renderResult(data);
 
       } catch (/** @type {unknown} */ err) {
         showError('Error fetching result: ' + (err instanceof Error ? err.message : String(err)));
