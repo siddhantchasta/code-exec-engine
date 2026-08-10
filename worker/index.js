@@ -5,6 +5,7 @@ const redis = require('../lib/redis');
 const queue = require('./queue');
 const repository = require('./repository');
 const executor = require('./executor');
+const config = require('../lib/config');
 
 const jobKey = (id) => `exec:job:${id}`;
 
@@ -40,15 +41,16 @@ function resolveStatus(result) {
  *
  * @param {string} jobId
  * @param {string} code
+ * @param {string} language
  * @returns {Promise<void>}
  */
-async function processJob(jobId, code) {
+async function processJob(jobId, code, language) {
   // Mark running in Redis and PostgreSQL
   await redis.hset(jobKey(jobId), 'status', 'running');
   await repository.updateSubmissionStatus(jobId, 'running');
 
   try {
-    const result = await executor.execute(code, jobId);
+    const result = await executor.execute(code, language, jobId);
     const finalStatus = resolveStatus(result);
 
     await repository.insertResult(jobId, result);
@@ -75,7 +77,7 @@ async function processJob(jobId, code) {
  * @returns {Promise<never>}
  */
 async function main() {
-  logger.info('worker started');
+  logger.info({ workerId: config.WORKER_ID }, 'worker started');
 
   while (true) {
     // BRPOP next job ID (blocks indefinitely until item is pushed)
@@ -95,7 +97,7 @@ async function main() {
       continue;
     }
 
-    await processJob(jobId, jobData.code);
+    await processJob(jobId, jobData.code, jobData.language ?? 'python');
   }
 }
 

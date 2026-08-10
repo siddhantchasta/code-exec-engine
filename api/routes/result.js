@@ -33,6 +33,8 @@ function mount(router) {
       submissionId: row.submission_id,
       stdout: row.stdout,
       stderr: row.stderr,
+      compileStdout: row.compile_stdout,
+      compileStderr: row.compile_stderr,
       exitCode: row.exit_code,
       runtimeMs: row.runtime_ms,
       timedOut: row.timed_out,

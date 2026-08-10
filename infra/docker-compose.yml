@@ -1,4 +1,4 @@
-## Docker Compose — Backing services only (Redis + PostgreSQL)
+## Docker Compose — Redis, PostgreSQL, and three stateless worker replicas
 ## Usage: cd infra && docker-compose up -d
 
 services:
@@ -19,6 +19,29 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ../docs/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    restart: unless-stopped
+
+  worker:
+    image: node:20-slim
+    working_dir: /app
+    command: node worker/index.js
+    environment:
+      API_KEY: development-key
+      REDIS_URL: redis://redis:6379
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_USER: postgres
+      PG_PASSWORD: postgres
+      PG_DATABASE: code_exec
+      WORKER_ID: ${HOSTNAME:-worker}
+    volumes:
+      - ..:/app:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - redis
+      - postgres
+    deploy:
+      replicas: 3
     restart: unless-stopped
 
 volumes:

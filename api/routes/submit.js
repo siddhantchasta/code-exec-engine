@@ -8,12 +8,12 @@ const queue = require('../../worker/queue');
 const repository = require('../../worker/repository');
 
 // ---------------------------------------------------------------------------
-// POST /submit — accept a Python snippet, queue it for execution
+// POST /submit — accept a supported-language snippet and queue it for execution
 // ---------------------------------------------------------------------------
 
 const submitBodySchema = z.object({
   code: z.string().min(1).max(10000),
-  language: z.literal('python'),
+  language: z.enum(['python', 'javascript', 'cpp']),
 });
 
 /**
@@ -32,17 +32,23 @@ function mount(router) {
       return;
     }
 
-    const { code } = parsed.data;
+    const { code, language } = parsed.data;
     const id = crypto.randomUUID();
     const ip = req.ip || '0.0.0.0';
 
     try {
       // 1. Insert submission into PostgreSQL
-      await repository.createSubmission(id, ip);
+      await repository.createSubmission(id, language, ip);
 
       // 2. Set Redis job hash
       const now = new Date().toISOString();
-      await redis.hset(`exec:job:${id}`, 'status', 'pending', 'code', code, 'createdAt', now);
+      await redis.hset(
+        `exec:job:${id}`,
+        'status', 'pending',
+        'code', code,
+        'language', language,
+        'createdAt', now,
+      );
 
       // 3. Enqueue for worker
       await queue.enqueue(id);

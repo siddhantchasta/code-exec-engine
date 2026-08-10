@@ -10,14 +10,15 @@ const db = require('../lib/db');
  * Create a new submission row (status defaults to 'pending' in schema).
  *
  * @param {string} id    — UUID
+ * @param {string} language
  * @param {string} userIp
  * @returns {Promise<void>}
  */
-async function createSubmission(id, userIp) {
+async function createSubmission(id, language, userIp) {
   await db.query(
     `INSERT INTO submissions (id, status, language, user_ip)
-     VALUES ($1, 'pending', 'python', $2)`,
-    [id, userIp],
+     VALUES ($1, 'pending', $2, $3)`,
+    [id, language, userIp],
   );
 }
 
@@ -39,18 +40,20 @@ async function updateSubmissionStatus(id, status) {
  * Insert the execution result for a submission.
  *
  * @param {string} submissionId
- * @param {{ stdout: string, stderr: string, exitCode: number, runtimeMs: number, timedOut: boolean }} result
+ * @param {{ stdout: string, stderr: string, compileStdout: string, compileStderr: string, exitCode: number, runtimeMs: number, timedOut: boolean }} result
  * @returns {Promise<void>}
  */
 async function insertResult(submissionId, result) {
   await db.query(
     `INSERT INTO execution_results
-       (submission_id, stdout, stderr, exit_code, runtime_ms, timed_out)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
+       (submission_id, stdout, stderr, compile_stdout, compile_stderr, exit_code, runtime_ms, timed_out)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [
       submissionId,
       result.stdout,
       result.stderr,
+      result.compileStdout,
+      result.compileStderr,
       result.exitCode,
       result.runtimeMs,
       result.timedOut,

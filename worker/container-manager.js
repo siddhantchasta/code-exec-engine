@@ -1,8 +1,8 @@
 'use strict';
 
 const Docker = require('dockerode');
-const config = require('../lib/config');
 const logger = require('../lib/logger');
+const { getLanguage } = require('../lib/languages');
 
 const docker = new Docker();
 
@@ -12,15 +12,20 @@ const docker = new Docker();
 
 /**
  * Create a sandbox container with all 8 security flags.
- * The user code file is bind-mounted read-only at /code/script.py.
+ * The user code file is bind-mounted read-only beneath /code.
  *
- * @param {string} hostCodePath — absolute path to the .py file on the host
+ * @param {string} hostCodePath — absolute path to the source file on the host
+ * @param {string} language
  * @returns {Promise<import('dockerode').Container>}
  */
-async function createContainer(hostCodePath) {
+async function createContainer(hostCodePath, language) {
+  const languageConfig = getLanguage(language);
+  if (!languageConfig) {
+    throw new TypeError(`unsupported language: ${language}`);
+  }
+
   const container = await docker.createContainer({
-    Image: config.DOCKER_IMAGE,
-    Cmd: ['python3', '/code/script.py'],
+    Image: languageConfig.image,
     WorkingDir: '/sandbox',
     User: '65534',
     NetworkDisabled: true,
@@ -30,14 +35,67 @@ async function createContainer(hostCodePath) {
       PidsLimit: 50,                       // --pids-limit=50
       NetworkMode: 'none',                 // --network=none
       ReadonlyRootfs: true,                // --read-only
-      Tmpfs: { '/sandbox': 'size=16m' },   // --tmpfs /sandbox:16m
+      Tmpfs: { '/sandbox': 'size=16m,mode=1777,exec' }, // writable, executable tmpfs for compiled programs
       CapDrop: ['ALL'],                    // --cap-drop=ALL
-      Binds: [`${hostCodePath}:/code/script.py:ro`],
+      Binds: [`${hostCodePath}:/code/${languageConfig.fileName}:ro`],
     },
   });
 
   logger.debug({ containerId: container.id }, 'container created');
   return container;
+}
+
+/**
+ * Run a command inside a running sandbox container and collect its output.
+ *
+ * @param {import('dockerode').Container} container
+ * @param {string[]} command
+ * @returns {Promise<{ stdout: string, stderr: string, exitCode: number }>}
+ */
+async function execInContainer(container, command) {
+  const exec = await container.exec({
+    Cmd: command,
+    AttachStdout: true,
+    AttachStderr: true,
+  });
+  const stream = await exec.start({ hijack: true, stdin: false });
+  const chunks = [];
+
+  await new Promise((resolve, reject) => {
+    stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+    stream.once('end', resolve);
+    stream.once('error', reject);
+  });
+
+  const inspection = await exec.inspect();
+  const logs = demultiplexLogs(Buffer.concat(chunks));
+  return { ...logs, exitCode: inspection.ExitCode ?? 1 };
+}
+
+/**
+ * @param {Buffer} buffer
+ * @returns {{ stdout: string, stderr: string }}
+ */
+function demultiplexLogs(buffer) {
+  /** @type {string[]} */
+  const stdoutChunks = [];
+  /** @type {string[]} */
+  const stderrChunks = [];
+  let offset = 0;
+
+  while (offset + 8 <= buffer.length) {
+    const streamType = buffer.readUInt8(offset);
+    const frameSize = buffer.readUInt32BE(offset + 4);
+    offset += 8;
+    if (offset + frameSize > buffer.length) break;
+
+    const payload = buffer.subarray(offset, offset + frameSize).toString('utf-8');
+    if (streamType === 1) stdoutChunks.push(payload);
+    if (streamType === 2) stderrChunks.push(payload);
+    offset += frameSize;
+  }
+
+  return { stdout: stdoutChunks.join(''), stderr: stderrChunks.join('') };
 }
 
 /**
@@ -152,6 +210,7 @@ async function removeContainer(container) {
 
 module.exports = {
   createContainer,
+  execInContainer,
   startContainer,
   waitForContainer,
   getContainerLogs,
