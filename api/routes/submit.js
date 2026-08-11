@@ -4,8 +4,10 @@ const crypto = require('crypto');
 const { z } = require('zod');
 const redis = require('../../lib/redis');
 const logger = require('../../lib/logger');
+const config = require('../../lib/config');
 const queue = require('../../worker/queue');
 const repository = require('../../worker/repository');
+const { job } = require('../../lib/redis-keys');
 
 // ---------------------------------------------------------------------------
 // POST /submit — accept a supported-language snippet and queue it for execution
@@ -37,17 +39,26 @@ function mount(router) {
     const ip = req.ip || '0.0.0.0';
 
     try {
+      const queueDepth = await queue.depth();
+      if (queueDepth >= config.MAX_QUEUE_DEPTH) {
+        res.set('Retry-After', '30');
+        logger.warn({ queueDepth, maxQueueDepth: config.MAX_QUEUE_DEPTH, ip }, 'submission rejected: queue full');
+        res.status(503).json({ error: 'Queue is full. Please retry later.' });
+        return;
+      }
+
       // 1. Insert submission into PostgreSQL
       await repository.createSubmission(id, language, ip);
 
       // 2. Set Redis job hash
       const now = new Date().toISOString();
       await redis.hset(
-        `exec:job:${id}`,
+        job(id),
         'status', 'pending',
         'code', code,
         'language', language,
         'createdAt', now,
+        'retryCount', '0',
       );
 
       // 3. Enqueue for worker

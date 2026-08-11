@@ -6,40 +6,22 @@ const queue = require('./queue');
 const repository = require('./repository');
 const executor = require('./executor');
 const config = require('../lib/config');
-
-const jobKey = (id) => `exec:job:${id}`;
-const resultKey = (id) => `exec:result:${id}`;
-const streamChannel = (id) => `exec:stream:${id}`;
-
-// ---------------------------------------------------------------------------
-// Single async worker loop
-//
-// Flow per iteration:
-//   1. BRPOP next job ID from Redis queue (blocks indefinitely)
-//   2. Load code from Redis job hash
-//   3. Mark status → running (Redis + PG)
-//   4. Execute code in Docker sandbox
-//   5. Determine final status (done | failed | timeout)
-//   6. Store result in PG, update status in Redis + PG
-//
-// Known gap: if the worker crashes mid-job, the job stays 'running' forever.
-// No watchdog or DLQ — documented honestly in project-brief.md.
-// ---------------------------------------------------------------------------
+const { PROCESSING, heartbeat, job, result, stream } = require('../lib/redis-keys');
 
 /**
  * Determine the final status based on execution result.
  *
- * @param {{ timedOut: boolean, exitCode: number }} result
+ * @param {{ timedOut: boolean, exitCode: number }} executionResult
  * @returns {'done' | 'failed' | 'timeout'}
  */
-function resolveStatus(result) {
-  if (result.timedOut) return 'timeout';
-  if (result.exitCode !== 0) return 'failed';
+function resolveStatus(executionResult) {
+  if (executionResult.timedOut) return 'timeout';
+  if (executionResult.exitCode !== 0) return 'failed';
   return 'done';
 }
 
 /**
- * Process a single job: execute code, store result, update statuses.
+ * Process one claimed job and persist its terminal result.
  *
  * @param {string} jobId
  * @param {string} code
@@ -47,85 +29,111 @@ function resolveStatus(result) {
  * @returns {Promise<void>}
  */
 async function processJob(jobId, code, language) {
-  // Mark running in Redis and PostgreSQL
-  await redis.hset(jobKey(jobId), 'status', 'running');
+  await redis.hset(job(jobId), 'status', 'running');
   await repository.updateSubmissionStatus(jobId, 'running');
 
   try {
-    const result = await executor.execute(code, language, jobId);
-    const finalStatus = resolveStatus(result);
+    const executionResult = await executor.execute(code, language, jobId);
+    const finalStatus = resolveStatus(executionResult);
 
-    await repository.insertResult(jobId, result);
+    await repository.insertResult(jobId, executionResult);
     await repository.updateSubmissionStatus(jobId, finalStatus);
-    await redis.hset(jobKey(jobId), 'status', finalStatus);
+    await redis.hset(job(jobId), 'status', finalStatus);
     await redis.hset(
-      resultKey(jobId),
+      result(jobId),
       'status', finalStatus,
-      'stdout', result.stdout,
-      'stderr', result.stderr,
-      'compileStdout', result.compileStdout,
-      'compileStderr', result.compileStderr,
-      'exitCode', String(result.exitCode),
-      'runtimeMs', String(result.runtimeMs),
-      'timedOut', String(result.timedOut),
+      'stdout', executionResult.stdout,
+      'stderr', executionResult.stderr,
+      'compileStdout', executionResult.compileStdout,
+      'compileStderr', executionResult.compileStderr,
+      'exitCode', String(executionResult.exitCode),
+      'runtimeMs', String(executionResult.runtimeMs),
+      'timedOut', String(executionResult.timedOut),
     );
     await redis.publish(
-      streamChannel(jobId),
-      JSON.stringify({
-        type: 'done',
-        result: { ...result, status: finalStatus },
-      }),
+      stream(jobId),
+      JSON.stringify({ type: 'done', result: { ...executionResult, status: finalStatus } }),
     );
-
-    logger.info(
-      { submissionId: jobId, status: finalStatus, runtimeMs: result.runtimeMs },
-      'job completed',
-    );
+    logger.info({ jobId, status: finalStatus, runtimeMs: executionResult.runtimeMs }, 'job completed');
   } catch (/** @type {unknown} */ err) {
-    logger.error({ submissionId: jobId, err }, 'job execution failed');
-    await redis.hset(jobKey(jobId), 'status', 'failed').catch(/** @param {unknown} e */ (e) => {
-      logger.error({ submissionId: jobId, err: e }, 'failed to set failure status in redis');
+    logger.error({ jobId, err }, 'job execution failed');
+    await redis.hset(job(jobId), 'status', 'failed').catch(/** @param {unknown} redisError */ (redisError) => {
+      logger.error({ jobId, err: redisError }, 'failed to set failure status in redis');
     });
-    await repository.updateSubmissionStatus(jobId, 'failed').catch(/** @param {unknown} e */ (e) => {
-      logger.error({ submissionId: jobId, err: e }, 'failed to set failure status in pg');
+    await repository.updateSubmissionStatus(jobId, 'failed').catch(/** @param {unknown} dbError */ (dbError) => {
+      logger.error({ jobId, err: dbError }, 'failed to set failure status in postgres');
     });
   }
 }
 
-/**
- * Main worker loop — runs forever, one job at a time.
- * @returns {Promise<never>}
- */
+/** @returns {Promise<void>} */
 async function main() {
+  let draining = false;
+  /** @type {Promise<void> | null} */
+  let activeJob = null;
+
+  const sendHeartbeat = async () => {
+    await redis.set(heartbeat(config.WORKER_ID), '1', 'EX', config.HEARTBEAT_TTL_SECONDS);
+  };
+  await sendHeartbeat();
+  const heartbeatInterval = setInterval(() => {
+    sendHeartbeat().catch(/** @param {unknown} err */ (err) => {
+      logger.error({ workerId: config.WORKER_ID, err }, 'failed to refresh worker heartbeat');
+    });
+  }, config.HEARTBEAT_INTERVAL_MS);
+
+  /** @returns {Promise<void>} */
+  const shutdown = async () => {
+    if (draining) return;
+    draining = true;
+    clearInterval(heartbeatInterval);
+    logger.info({ workerId: config.WORKER_ID }, 'worker draining after shutdown signal');
+    if (activeJob) {
+      await Promise.race([
+        activeJob,
+        new Promise((resolve) => setTimeout(resolve, config.SHUTDOWN_TIMEOUT_MS)),
+      ]);
+    }
+    await redis.del(heartbeat(config.WORKER_ID));
+    await redis.quit();
+    process.exit(0);
+  };
+
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
   logger.info({ workerId: config.WORKER_ID }, 'worker started');
 
-  while (true) {
-    // BRPOP next job ID (blocks indefinitely until item is pushed)
-    const jobId = await queue.dequeue();
+  while (!draining) {
+    const jobId = await queue.dequeue(1);
+    if (!jobId) continue;
+    if (draining) break;
 
-    logger.info({ submissionId: jobId }, 'job dequeued');
-
-    // Load code from Redis job hash
-    const jobData = await redis.hgetall(jobKey(jobId));
-
-    if (!jobData || !jobData.code) {
-      logger.error({ submissionId: jobId }, 'job hash missing or has no code field — skipping');
-      await redis.hset(jobKey(jobId), 'status', 'failed');
-      await repository.updateSubmissionStatus(jobId, 'failed').catch(/** @param {unknown} e */ (e) => {
-        logger.error({ submissionId: jobId, err: e }, 'failed to update pg status for missing-code job');
-      });
-      continue;
-    }
-
-    await processJob(jobId, jobData.code, jobData.language ?? 'python');
+    logger.info({ jobId, workerId: config.WORKER_ID }, 'job dequeued');
+    await redis.hset(PROCESSING, jobId, JSON.stringify({ workerId: config.WORKER_ID, startedAt: Date.now() }));
+    activeJob = (async () => {
+      try {
+        const jobData = await redis.hgetall(job(jobId));
+        if (!jobData.code) {
+          logger.error({ jobId, workerId: config.WORKER_ID }, 'job hash missing or has no code field');
+          await redis.hset(job(jobId), 'status', 'failed');
+          await repository.updateSubmissionStatus(jobId, 'failed');
+          return;
+        }
+        await processJob(jobId, jobData.code, jobData.language ?? 'python');
+      } finally {
+        await redis.hdel(PROCESSING, jobId);
+      }
+    })();
+    await activeJob;
+    activeJob = null;
   }
 }
 
-// ---------------------------------------------------------------------------
-// Entry point — run when invoked directly: node worker/index.js
-// ---------------------------------------------------------------------------
+if (require.main === module) {
+  main().catch(/** @param {unknown} err */ (err) => {
+    logger.fatal({ err }, 'worker crashed');
+    process.exit(1);
+  });
+}
 
-main().catch(/** @param {unknown} err */ (err) => {
-  logger.fatal({ err }, 'worker crashed');
-  process.exit(1);
-});
+module.exports = { main, processJob, resolveStatus };

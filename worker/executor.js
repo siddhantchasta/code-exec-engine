@@ -9,8 +9,7 @@ const config = require('../lib/config');
 const { getLanguage } = require('../lib/languages');
 const logger = require('../lib/logger');
 const redis = require('../lib/redis');
-
-const streamChannel = (submissionId) => `exec:stream:${submissionId}`;
+const { stream } = require('../lib/redis-keys');
 
 /**
  * @typedef {Object} ExecutionResult
@@ -47,10 +46,10 @@ async function executePhase(container, command, timeoutMs, submissionId, phase) 
     const result = await containerManager.execInContainer(container, command, {
       tty: phase === 'run',
       onChunk: phase === 'run'
-        ? (chunk, stream) => {
+        ? (chunk, outputStream) => {
           redis.publish(
-            streamChannel(submissionId),
-            JSON.stringify({ type: 'output', stream, chunk }),
+            stream(submissionId),
+            JSON.stringify({ type: 'output', stream: outputStream, chunk }),
           ).catch(/** @param {unknown} err */ (err) => {
             logger.error({ submissionId, err }, 'failed to publish output chunk');
           });

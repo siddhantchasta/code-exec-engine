@@ -6,9 +6,12 @@
   "scripts": {
     "api": "node api/index.js",
     "worker": "node worker/index.js",
+    "watchdog": "node worker/watchdog.js",
     "test:gate": "node test-executor.js",
     "test:languages": "node test-languages.js",
     "test:websocket": "node api/websocket.test.js",
+    "test:rate-limiter": "node lib/rate-limiter.test.js",
+    "test:watchdog": "node worker/watchdog.test.js",
     "test:stage2": "node test-stage-2.js",
     "test:stage3": "node test-stage-3.js",
     "test:stage4": "node test-stage-4.js"

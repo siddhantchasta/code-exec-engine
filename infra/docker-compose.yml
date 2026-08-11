@@ -44,5 +44,24 @@ services:
       replicas: 3
     restart: unless-stopped
 
+  watchdog:
+    image: node:20-slim
+    working_dir: /app
+    command: node worker/watchdog.js
+    environment:
+      API_KEY: development-key
+      REDIS_URL: redis://redis:6379
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_USER: postgres
+      PG_PASSWORD: postgres
+      PG_DATABASE: code_exec
+    volumes:
+      - ..:/app:ro
+    depends_on:
+      - redis
+      - postgres
+    restart: unless-stopped
+
 volumes:
   pgdata:

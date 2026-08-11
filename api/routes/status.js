@@ -2,6 +2,7 @@
 
 const { z } = require('zod');
 const redis = require('../../lib/redis');
+const { job } = require('../../lib/redis-keys');
 
 // ---------------------------------------------------------------------------
 // GET /status/:id — fast status lookup from Redis hash
@@ -22,7 +23,7 @@ function mount(router) {
     }
 
     const id = parsed.data;
-    const status = await redis.hget(`exec:job:${id}`, 'status');
+    const status = await redis.hget(job(id), 'status');
 
     if (!status) {
       res.status(404).json({ error: 'Submission not found' });
