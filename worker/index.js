@@ -7,6 +7,7 @@ const repository = require('./repository');
 const executor = require('./executor');
 const config = require('../lib/config');
 const { PROCESSING, heartbeat, job, result, stream } = require('../lib/redis-keys');
+const { executionDuration, queueDepth: queueDepthGauge, dlqDepth: dlqDepthGauge, recordDuration } = require('../lib/metrics');
 
 /**
  * Determine the final status based on execution result.
@@ -26,15 +27,24 @@ function resolveStatus(executionResult) {
  * @param {string} jobId
  * @param {string} code
  * @param {string} language
+ * @param {string} requestId
  * @returns {Promise<void>}
  */
-async function processJob(jobId, code, language) {
+async function processJob(jobId, code, language, requestId) {
   await redis.hset(job(jobId), 'status', 'running');
   await repository.updateSubmissionStatus(jobId, 'running');
+
+  const startTime = Date.now();
 
   try {
     const executionResult = await executor.execute(code, language, jobId);
     const finalStatus = resolveStatus(executionResult);
+    const runtimeMs = Date.now() - startTime;
+
+    // Persist to Redis for cross-process Prometheus aggregation
+    await recordDuration(redis, language, finalStatus, runtimeMs);
+    // Also observe in-process (for any local tooling / tests)
+    executionDuration.observe({ language, status: finalStatus }, runtimeMs);
 
     await repository.insertResult(jobId, executionResult);
     await repository.updateSubmissionStatus(jobId, finalStatus);
@@ -54,14 +64,14 @@ async function processJob(jobId, code, language) {
       stream(jobId),
       JSON.stringify({ type: 'done', result: { ...executionResult, status: finalStatus } }),
     );
-    logger.info({ jobId, status: finalStatus, runtimeMs: executionResult.runtimeMs }, 'job completed');
+    logger.info({ requestId, jobId, status: finalStatus, runtimeMs: executionResult.runtimeMs }, 'job completed');
   } catch (/** @type {unknown} */ err) {
-    logger.error({ jobId, err }, 'job execution failed');
+    logger.error({ requestId, jobId, err }, 'job execution failed');
     await redis.hset(job(jobId), 'status', 'failed').catch(/** @param {unknown} redisError */ (redisError) => {
-      logger.error({ jobId, err: redisError }, 'failed to set failure status in redis');
+      logger.error({ requestId, jobId, err: redisError }, 'failed to set failure status in redis');
     });
     await repository.updateSubmissionStatus(jobId, 'failed').catch(/** @param {unknown} dbError */ (dbError) => {
-      logger.error({ jobId, err: dbError }, 'failed to set failure status in postgres');
+      logger.error({ requestId, jobId, err: dbError }, 'failed to set failure status in postgres');
     });
   }
 }
@@ -119,9 +129,19 @@ async function main() {
           await repository.updateSubmissionStatus(jobId, 'failed');
           return;
         }
-        await processJob(jobId, jobData.code, jobData.language ?? 'python');
+        const requestId = jobData.requestId || 'unknown';
+        logger.info({ requestId, jobId, workerId: config.WORKER_ID, language: jobData.language }, 'job processing started');
+
+        // Update queue depth gauge after dequeue
+        const currentDepth = await queue.depth();
+        queueDepthGauge.set(currentDepth);
+
+        await processJob(jobId, jobData.code, jobData.language ?? 'python', requestId);
       } finally {
         await redis.hdel(PROCESSING, jobId);
+        // Update DLQ depth gauge after each job (watchdog may have promoted to DLQ)
+        const dlqLen = await redis.llen('exec:dlq');
+        dlqDepthGauge.set(dlqLen);
       }
     })();
     await activeJob;

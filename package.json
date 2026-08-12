@@ -14,7 +14,9 @@
     "test:watchdog": "node worker/watchdog.test.js",
     "test:stage2": "node test-stage-2.js",
     "test:stage3": "node test-stage-3.js",
-    "test:stage4": "node test-stage-4.js"
+    "test:stage4": "node test-stage-4.js",
+    "test:shutdown": "node test-graceful-shutdown.js",
+    "benchmark": "node benchmark.js"
   },
   "dependencies": {
     "dockerode": "^4.0.4",
@@ -23,6 +25,7 @@
     "ioredis": "^5.11.0",
     "pg": "^8.21.0",
     "pino": "^9.6.0",
+    "prom-client": "^15.1.3",
     "ws": "^8.18.3",
     "zod": "^3.24.0"
   },
