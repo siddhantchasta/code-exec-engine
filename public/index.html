@@ -3,1010 +3,1910 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Sandboxed Python code execution engine — run Python snippets safely in Docker containers with 8 kernel-enforced security constraints.">
-  <title>Sandboxed Code Execution Engine</title>
+  <meta name="description" content="Distributed Code Execution Engine (v2) — sandboxed polyglot runner (Python, Node.js, C++) with real-time WebSocket streaming, 8 kernel security constraints, Redis FIFO queue, multi-worker pool, watchdog crash recovery, and Prometheus telemetry.">
+  <title>CodeExec Engine v2 | Distributed Sandboxed Runner</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
   <style>
     /* ================================================================
-       Design System — Tokens
+       Design Tokens & Theme Variables
        ================================================================ */
     :root {
-      /* Palette — deep navy / electric accents */
-      --bg-primary:    #0a0e1a;
-      --bg-secondary:  #111827;
-      --bg-surface:    #1a2035;
-      --bg-elevated:   #222b45;
-      --bg-glass:      rgba(26, 32, 53, 0.65);
+      --bg-canvas:      #090d16;
+      --bg-surface:     #0f172a;
+      --bg-elevated:    #1e293b;
+      --bg-subtle:      #172033;
+      --bg-terminal:    #060911;
 
-      --text-primary:  #e2e8f0;
-      --text-secondary:#94a3b8;
-      --text-muted:    #64748b;
+      --text-primary:   #f1f5f9;
+      --text-secondary: #94a3b8;
+      --text-muted:     #64748b;
+      --text-dim:       #475569;
 
-      --accent:        #6366f1;  /* Indigo */
-      --accent-hover:  #818cf8;
-      --accent-glow:   rgba(99, 102, 241, 0.35);
+      --accent:         #3b82f6;
+      --accent-hover:   #60a5fa;
+      --accent-dim:     rgba(59, 130, 246, 0.12);
 
-      --green:         #34d399;
-      --green-dim:     rgba(52, 211, 153, 0.12);
-      --red:           #f87171;
-      --red-dim:       rgba(248, 113, 113, 0.12);
-      --yellow:        #fbbf24;
-      --yellow-dim:    rgba(251, 191, 36, 0.12);
-      --cyan:          #22d3ee;
+      --emerald:        #10b981;
+      --emerald-dim:    rgba(16, 185, 129, 0.12);
+      --rose:           #f43f5e;
+      --rose-dim:       rgba(244, 63, 94, 0.12);
+      --amber:          #f59e0b;
+      --amber-dim:      rgba(245, 158, 11, 0.12);
+      --cyan:           #06b6d4;
+      --cyan-dim:       rgba(6, 182, 212, 0.12);
 
-      --border:        rgba(148, 163, 184, 0.1);
-      --border-focus:  rgba(99, 102, 241, 0.5);
+      --border:         #334155;
+      --border-subtle:  #1e293b;
+      --border-focus:   #60a5fa;
 
-      --radius-sm:     6px;
-      --radius-md:     10px;
-      --radius-lg:     16px;
+      --radius-sm:      4px;
+      --radius-md:      8px;
+      --radius-lg:      12px;
 
-      --font-sans:     'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      --font-mono:     'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+      --font-sans:      'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono:      'JetBrains Mono', monospace;
 
-      --shadow-lg:     0 8px 32px rgba(0, 0, 0, 0.4);
-      --shadow-glow:   0 0 24px var(--accent-glow);
+      --shadow-sm:      0 1px 2px 0 rgba(0, 0, 0, 0.35);
+      --shadow-md:      0 4px 16px -2px rgba(0, 0, 0, 0.45);
+      --shadow-lg:      0 12px 32px -4px rgba(0, 0, 0, 0.6);
 
-      --transition:    0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      --transition:     0.15s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     /* ================================================================
-       Reset & Base
+       Reset & Base Styles
        ================================================================ */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       font-family: var(--font-sans);
-      background: var(--bg-primary);
+      background-color: var(--bg-canvas);
       color: var(--text-primary);
-      line-height: 1.6;
+      line-height: 1.5;
       min-height: 100vh;
-      overflow-x: hidden;
+      display: flex;
+      flex-direction: column;
+      -webkit-font-smoothing: antialiased;
     }
 
-    /* Ambient background gradient */
+    /* Ambient background grid / glow */
     body::before {
       content: '';
       position: fixed;
       inset: 0;
       background:
-        radial-gradient(ellipse 80% 60% at 20% 10%, rgba(99, 102, 241, 0.08) 0%, transparent 60%),
-        radial-gradient(ellipse 60% 50% at 80% 80%, rgba(34, 211, 238, 0.06) 0%, transparent 60%);
+        radial-gradient(ellipse 60% 40% at 15% 0%, rgba(59, 130, 246, 0.07) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 30% at 85% 100%, rgba(16, 185, 129, 0.05) 0%, transparent 70%);
       pointer-events: none;
       z-index: 0;
     }
 
     /* ================================================================
-       Layout
+       Layout & App Shell
        ================================================================ */
-    .app {
+    .app-shell {
       position: relative;
       z-index: 1;
-      max-width: 900px;
+      max-width: 1280px;
+      width: 100%;
       margin: 0 auto;
-      padding: 24px 20px 48px;
-    }
-
-    /* ================================================================
-       Settings Bar
-       ================================================================ */
-    .settings-bar {
+      padding: 16px 24px 32px;
       display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 24px;
-      padding: 10px 16px;
-      background: var(--bg-glass);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-    }
-
-    .settings-bar label {
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      white-space: nowrap;
-    }
-
-    .settings-bar input {
+      flex-direction: column;
+      gap: 16px;
       flex: 1;
-      min-width: 0;
-      padding: 6px 10px;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--text-secondary);
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      outline: none;
-      transition: border-color var(--transition);
     }
 
-    .settings-bar input:focus {
-      border-color: var(--border-focus);
-    }
-
-    .lock-icon {
-      color: var(--text-muted);
-      font-size: 14px;
-    }
-
-    /* ================================================================
-       Header
-       ================================================================ */
-    .header {
-      text-align: center;
-      margin-bottom: 32px;
-    }
-
-    .header h1 {
-      font-size: 28px;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent-hover) 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .header p {
-      margin-top: 6px;
-      font-size: 14px;
-      color: var(--text-muted);
-    }
-
-    .header .tag-row {
+    /* Top Navigation / App Header */
+    .top-header {
       display: flex;
-      justify-content: center;
-      gap: 8px;
-      margin-top: 12px;
-      flex-wrap: wrap;
-    }
-
-    .tag {
-      display: inline-flex;
       align-items: center;
-      gap: 4px;
-      padding: 3px 10px;
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--text-secondary);
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
-      border-radius: 999px;
-    }
-
-    .tag .dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-    }
-
-    .tag .dot.docker    { background: #2496ED; }
-    .tag .dot.redis     { background: #DC382D; }
-    .tag .dot.postgres  { background: #4169E1; }
-    .tag .dot.python    { background: #3776AB; }
-
-    /* ================================================================
-       Editor Panel
-       ================================================================ */
-    .editor-panel {
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 18px;
       background: var(--bg-surface);
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--radius-md);
+      background: linear-gradient(135deg, #2563eb, #06b6d4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      font-size: 14px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .brand-text h1 {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .badge-v2 {
+      font-size: 10px;
+      font-family: var(--font-mono);
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--accent-dim);
+      color: var(--accent-hover);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+    }
+
+    .brand-text p {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .cluster-status-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .cluster-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+      background: var(--bg-elevated);
+      padding: 4px 10px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-subtle);
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--emerald);
+    }
+
+    .status-dot.active-pulse {
+      animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+
+    @keyframes pulse-ring {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+
+    .auth-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .auth-input-wrapper {
+      display: flex;
+      align-items: center;
+      background: var(--bg-canvas);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 4px 8px;
+      gap: 6px;
+    }
+
+    .auth-input-wrapper span {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .auth-input-wrapper input {
+      background: transparent;
+      border: none;
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      width: 140px;
+      outline: none;
+    }
+
+    /* Tab Navigation */
+    .nav-tabs {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--bg-surface);
+      padding: 4px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      width: fit-content;
+    }
+
+    .tab-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      background: transparent;
+      border: none;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+
+    .tab-btn:hover {
+      color: var(--text-primary);
+      background: var(--bg-elevated);
+    }
+
+    .tab-btn.active {
+      color: #fff;
+      background: var(--accent);
+      font-weight: 600;
+    }
+
+    /* Tab Views */
+    .tab-view {
+      display: none;
+    }
+
+    .tab-view.active {
+      display: block;
+    }
+
+    /* ================================================================
+       Main Studio View: Split Workspace
+       ================================================================ */
+    .studio-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    @media (max-width: 960px) {
+      .studio-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Card Panels */
+    .panel {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
       overflow: hidden;
-      box-shadow: var(--shadow-lg);
-      transition: box-shadow var(--transition);
     }
 
-    .editor-panel:focus-within {
-      box-shadow: var(--shadow-lg), var(--shadow-glow);
-    }
-
-    .editor-titlebar {
+    .panel-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       padding: 10px 16px;
-      background: var(--bg-elevated);
+      background: var(--bg-subtle);
       border-bottom: 1px solid var(--border);
+      gap: 12px;
     }
 
-    .editor-titlebar .dots {
+    .panel-title {
       display: flex;
-      gap: 6px;
-    }
-
-    .editor-titlebar .dots span {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-    }
-
-    .editor-titlebar .dots span:nth-child(1) { background: #ff5f57; }
-    .editor-titlebar .dots span:nth-child(2) { background: #febc2e; }
-    .editor-titlebar .dots span:nth-child(3) { background: #28c840; }
-
-    .editor-titlebar .filename {
-      font-family: var(--font-mono);
+      align-items: center;
+      gap: 8px;
       font-size: 12px;
-      color: var(--text-muted);
-    }
-
-    .editor-titlebar .lang-badge {
-      font-size: 11px;
       font-weight: 600;
-      color: #3776AB;
-      background: rgba(55, 118, 171, 0.12);
-      padding: 2px 8px;
-      border-radius: var(--radius-sm);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-secondary);
     }
 
-    #code-editor {
-      display: block;
-      width: 100%;
-      min-height: 220px;
-      padding: 16px;
-      font-family: var(--font-mono);
-      font-size: 14px;
-      line-height: 1.7;
+    .panel-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Language & Preset Controls */
+    .select-dropdown {
+      background: var(--bg-elevated);
       color: var(--text-primary);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: var(--radius-sm);
+      font-family: var(--font-sans);
+      font-size: 12px;
+      font-weight: 500;
+      outline: none;
+      cursor: pointer;
+      transition: border-color var(--transition);
+    }
+
+    .select-dropdown:focus {
+      border-color: var(--border-focus);
+    }
+
+    /* Presets Strip */
+    .preset-strip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      background: var(--bg-canvas);
+      border-bottom: 1px solid var(--border-subtle);
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+
+    .preset-strip-label {
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      white-space: nowrap;
+      margin-right: 4px;
+    }
+
+    .preset-chip {
+      font-size: 11px;
+      font-weight: 500;
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-subtle);
+      white-space: nowrap;
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+
+    .preset-chip:hover {
+      color: var(--text-primary);
+      border-color: var(--border);
+      background: var(--bg-surface);
+    }
+
+    .preset-chip.danger {
+      color: var(--rose);
+      background: var(--rose-dim);
+      border-color: rgba(244, 63, 94, 0.2);
+    }
+
+    .preset-chip.danger:hover {
+      background: rgba(244, 63, 94, 0.25);
+    }
+
+    /* Editor Container */
+    .editor-container {
+      position: relative;
+      display: flex;
+      flex: 1;
+      min-height: 420px;
+      background: var(--bg-terminal);
+    }
+
+    .line-numbers {
+      padding: 16px 8px 16px 12px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text-dim);
+      text-align: right;
+      user-select: none;
+      border-right: 1px solid var(--border-subtle);
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    .code-textarea {
+      flex: 1;
+      width: 100%;
       background: transparent;
       border: none;
-      resize: vertical;
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.6;
+      padding: 16px;
+      resize: none;
       outline: none;
       tab-size: 4;
+      white-space: pre;
+      overflow-x: auto;
     }
 
-    #code-editor::placeholder {
-      color: var(--text-muted);
-      opacity: 0.5;
-    }
-
-    /* ================================================================
-       Action Bar
-       ================================================================ */
-    .action-bar {
+    .editor-footer {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      padding: 10px 16px;
+      background: var(--bg-subtle);
+      border-top: 1px solid var(--border);
       gap: 12px;
-      margin-top: 16px;
     }
 
-    .char-count {
-      font-size: 12px;
-      color: var(--text-muted);
+    .meta-metrics {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 11px;
       font-family: var(--font-mono);
+      color: var(--text-muted);
     }
 
-    #submit-btn {
+    .btn-run {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 10px 28px;
-      font-family: var(--font-sans);
-      font-size: 14px;
-      font-weight: 600;
+      padding: 8px 20px;
+      background: var(--accent);
       color: #fff;
-      background: linear-gradient(135deg, var(--accent) 0%, #8b5cf6 100%);
+      font-size: 13px;
+      font-weight: 600;
       border: none;
-      border-radius: var(--radius-md);
+      border-radius: var(--radius-sm);
       cursor: pointer;
       transition: all var(--transition);
-      position: relative;
-      overflow: hidden;
+      box-shadow: var(--shadow-sm);
     }
 
-    #submit-btn:hover:not(:disabled) {
+    .btn-run:hover:not(:disabled) {
+      background: var(--accent-hover);
       transform: translateY(-1px);
-      box-shadow: 0 4px 16px var(--accent-glow);
     }
 
-    #submit-btn:active:not(:disabled) {
+    .btn-run:active:not(:disabled) {
       transform: translateY(0);
     }
 
-    #submit-btn:disabled {
+    .btn-run:disabled {
       opacity: 0.6;
       cursor: not-allowed;
     }
 
-    #submit-btn .spinner {
+    .spinner {
       display: none;
-      width: 16px;
-      height: 16px;
-      border: 2px solid rgba(255,255,255,0.3);
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
       border-top-color: #fff;
       border-radius: 50%;
-      animation: spin 0.7s linear infinite;
+      animation: spin 0.6s linear infinite;
     }
 
-    #submit-btn.loading .spinner { display: inline-block; }
-    #submit-btn.loading .btn-text { display: none; }
+    .btn-run.loading .spinner { display: inline-block; }
+    .btn-run.loading .btn-text { display: none; }
 
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
-    /* Pulse animation while waiting */
-    @keyframes pulse-glow {
-      0%, 100% { box-shadow: 0 0 8px var(--accent-glow); }
-      50%      { box-shadow: 0 0 24px var(--accent-glow), 0 0 48px rgba(99,102,241,0.15); }
-    }
-
-    #submit-btn.loading {
-      animation: pulse-glow 1.8s ease-in-out infinite;
-    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ================================================================
-       Status Section
+       Live Streaming Terminal / Console Panel
        ================================================================ */
-    .status-section {
-      margin-top: 24px;
-      display: none;
-    }
-
-    .status-section.visible { display: block; }
-
-    .status-row {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 12px 16px;
-      background: var(--bg-glass);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-    }
-
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 12px;
-      font-size: 12px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      border-radius: 999px;
-      transition: all 0.4s ease;
-    }
-
-    .status-badge .pulse-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      animation: pulse-dot 1.5s ease-in-out infinite;
-    }
-
-    @keyframes pulse-dot {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50%      { opacity: 0.4; transform: scale(0.7); }
-    }
-
-    .status-badge.pending  { color: var(--yellow); background: var(--yellow-dim); }
-    .status-badge.pending .pulse-dot  { background: var(--yellow); }
-
-    .status-badge.running  { color: var(--cyan);   background: rgba(34,211,238,0.12); }
-    .status-badge.running .pulse-dot  { background: var(--cyan); }
-
-    .status-badge.done     { color: var(--green);  background: var(--green-dim); }
-    .status-badge.done .pulse-dot     { display: none; }
-
-    .status-badge.failed,
-    .status-badge.timeout  { color: var(--red);    background: var(--red-dim); }
-    .status-badge.failed .pulse-dot,
-    .status-badge.timeout .pulse-dot  { display: none; }
-
-    .status-id {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--text-muted);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .status-timer {
-      margin-left: auto;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--text-muted);
-    }
-
-    /* ================================================================
-       Result Panel
-       ================================================================ */
-    .result-panel {
-      margin-top: 16px;
-      display: none;
-      animation: slide-in 0.35s ease-out;
-    }
-
-    .result-panel.visible { display: block; }
-
-    @keyframes slide-in {
-      from { opacity: 0; transform: translateY(12px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-
-    .result-card {
-      background: var(--bg-surface);
+    .terminal-panel {
+      background: var(--bg-terminal);
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
+      display: flex;
+      flex-direction: column;
       overflow: hidden;
-      box-shadow: var(--shadow-lg);
+      box-shadow: var(--shadow-sm);
+      min-height: 480px;
     }
 
-    .result-header {
+    .terminal-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 10px 16px;
-      background: var(--bg-elevated);
+      padding: 8px 14px;
+      background: var(--bg-subtle);
       border-bottom: 1px solid var(--border);
     }
 
-    .result-header span {
-      font-size: 12px;
+    .terminal-tabs {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .term-tab {
+      padding: 4px 10px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      font-weight: 500;
+      color: var(--text-muted);
+      background: transparent;
+      border: none;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+
+    .term-tab.active {
+      color: var(--text-primary);
+      background: var(--bg-elevated);
+    }
+
+    .live-status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .state-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-family: var(--font-mono);
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-    }
-
-    .result-meta {
-      display: flex;
-      gap: 16px;
-    }
-
-    .meta-item {
-      font-family: var(--font-mono);
-      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+      background: var(--bg-elevated);
       color: var(--text-secondary);
     }
 
-    .meta-item .meta-label {
-      color: var(--text-muted);
-    }
+    .state-badge.pending { color: var(--amber); background: var(--amber-dim); }
+    .state-badge.running { color: var(--cyan); background: var(--cyan-dim); }
+    .state-badge.done    { color: var(--emerald); background: var(--emerald-dim); }
+    .state-badge.failed,
+    .state-badge.timeout { color: var(--rose); background: var(--rose-dim); }
 
-    .output-block {
-      position: relative;
-    }
-
-    .output-label {
-      position: absolute;
-      top: 8px;
-      right: 12px;
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--text-muted);
-      opacity: 0.6;
-    }
-
-    .output-block pre {
+    .terminal-body {
+      flex: 1;
       padding: 16px;
-      padding-right: 60px;
       font-family: var(--font-mono);
       font-size: 13px;
       line-height: 1.6;
+      color: var(--text-primary);
+      overflow-y: auto;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .terminal-stream {
       white-space: pre-wrap;
       word-break: break-all;
-      min-height: 48px;
-      margin: 0;
+      flex: 1;
     }
 
-    .output-block.stdout pre {
-      color: var(--green);
-      background: var(--green-dim);
-    }
-
-    .output-block.stderr pre {
-      color: var(--red);
-      background: var(--red-dim);
-      border-top: 1px solid var(--border);
-    }
-
-    .output-block.empty pre {
-      color: var(--text-muted);
+    .terminal-stream.empty {
+      color: var(--text-dim);
       font-style: italic;
     }
 
-    /* ================================================================
-       Error Toast
-       ================================================================ */
-    .error-toast {
-      margin-top: 16px;
-      padding: 12px 16px;
-      font-size: 13px;
-      color: var(--red);
-      background: var(--red-dim);
-      border: 1px solid rgba(248, 113, 113, 0.2);
-      border-radius: var(--radius-md);
-      display: none;
-      animation: slide-in 0.25s ease-out;
+    .stream-cursor {
+      display: inline-block;
+      width: 8px;
+      height: 15px;
+      background: var(--accent);
+      vertical-align: middle;
+      margin-left: 2px;
+      animation: blink 1s step-start infinite;
     }
 
-    .error-toast.visible { display: block; }
+    @keyframes blink { 50% { opacity: 0; } }
 
-    .error-toast code {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      padding: 1px 5px;
-      background: rgba(248, 113, 113, 0.1);
-      border-radius: 3px;
-    }
-
-    /* ================================================================
-       Footer
-       ================================================================ */
-    .footer {
-      text-align: center;
-      margin-top: 48px;
-      padding-top: 24px;
+    .terminal-footer-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 14px;
+      background: var(--bg-surface);
       border-top: 1px solid var(--border);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .meta-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .meta-val {
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    .meta-val.success { color: var(--emerald); }
+    .meta-val.danger  { color: var(--rose); }
+
+    /* ================================================================
+       Toast Alerts
+       ================================================================ */
+    .toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 100;
+    }
+
+    .toast {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      padding: 10px 16px;
+      border-radius: var(--radius-sm);
+      box-shadow: var(--shadow-lg);
+      font-size: 12px;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      animation: slide-toast 0.2s ease-out;
+      max-width: 400px;
+    }
+
+    .toast.error { border-left-color: var(--rose); }
+    .toast.success { border-left-color: var(--emerald); }
+    .toast.warning { border-left-color: var(--amber); }
+
+    @keyframes slide-toast {
+      from { transform: translateX(20px); opacity: 0; }
+      to   { transform: translateX(0); opacity: 1; }
+    }
+
+    /* ================================================================
+       Tab View 2: Cluster & Metrics Telemetry
+       ================================================================ */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .metric-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .metric-card-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .metric-card-val {
+      font-size: 28px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      color: var(--text-primary);
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+
+    .metric-subtext {
       font-size: 12px;
       color: var(--text-muted);
     }
 
-    .footer a {
-      color: var(--accent-hover);
-      text-decoration: none;
-      transition: color var(--transition);
+    .latency-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      font-family: var(--font-mono);
     }
 
-    .footer a:hover {
-      color: var(--accent);
+    .latency-table th, .latency-table td {
+      padding: 8px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .latency-table th {
+      color: var(--text-muted);
+      font-weight: 600;
+      background: var(--bg-subtle);
+    }
+
+    .latency-table td {
+      color: var(--text-secondary);
     }
 
     /* ================================================================
-       Responsive
+       Tab View 3: 8 Kernel Security Matrix
        ================================================================ */
-    @media (max-width: 600px) {
-      .app { padding: 16px 12px 32px; }
-      .header h1 { font-size: 22px; }
-      .action-bar { flex-direction: column-reverse; align-items: stretch; }
-      #submit-btn { justify-content: center; }
-      .status-row { flex-wrap: wrap; }
-      .status-timer { margin-left: 0; }
-      .result-meta { flex-wrap: wrap; gap: 8px; }
-      .settings-bar { flex-wrap: wrap; }
+    .security-matrix-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 14px;
+    }
+
+    .sec-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sec-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .sec-card-flag {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent-hover);
+      background: var(--accent-dim);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .sec-card-desc {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .sec-card-action {
+      margin-top: auto;
+      padding-top: 8px;
+    }
+
+    .btn-test-sec {
+      width: 100%;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+
+    .btn-test-sec:hover {
+      background: var(--bg-subtle);
+      border-color: var(--border-focus);
+    }
+
+    /* ================================================================
+       Tab View 4: Execution History
+       ================================================================ */
+    .history-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      font-family: var(--font-mono);
+    }
+
+    .history-table th, .history-table td {
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .history-table th {
+      color: var(--text-muted);
+      background: var(--bg-subtle);
+      font-weight: 600;
+    }
+
+    .history-table tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+      cursor: pointer;
+    }
+
+    /* Footer */
+    .site-footer {
+      margin-top: auto;
+      text-align: center;
+      padding: 16px 0;
+      font-size: 12px;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border-subtle);
     }
   </style>
 </head>
 <body>
-  <div class="app">
-    <!-- Settings Bar — API Key -->
-    <div class="settings-bar">
-      <span class="lock-icon">🔑</span>
-      <label for="api-key-input">API Key</label>
-      <input type="text" id="api-key-input" value="test-api-key-dev-only" spellcheck="false" autocomplete="off">
-    </div>
+  <div class="app-shell">
 
-    <!-- Header -->
-    <header class="header">
-      <h1>Sandboxed Code Execution Engine</h1>
-      <p>Run Python snippets safely in Docker containers with 8 kernel-enforced security constraints</p>
-      <div class="tag-row">
-        <span class="tag"><span class="dot docker"></span> Docker</span>
-        <span class="tag"><span class="dot redis"></span> Redis</span>
-        <span class="tag"><span class="dot postgres"></span> PostgreSQL</span>
-        <span class="tag"><span class="dot python"></span> Python 3.12</span>
+    <!-- Top App Header -->
+    <header class="top-header">
+      <div class="brand">
+        <div class="brand-icon">&gt;_</div>
+        <div class="brand-text">
+          <h1>CodeExec Engine <span class="badge-v2">v2 Distributed</span></h1>
+          <p>Multi-Language Sandboxed Execution with Real-Time Streaming &amp; Crash Recovery</p>
+        </div>
+      </div>
+
+      <!-- Live Cluster State Badges -->
+      <div class="cluster-status-bar">
+        <div class="cluster-pill" title="Stateless worker replicas running in background">
+          <span class="status-dot active-pulse"></span> Worker Pool: 3 Replicas
+        </div>
+        <div class="cluster-pill" title="FIFO Queue for atomic task assignment">
+          <span class="status-dot"></span> Redis FIFO
+        </div>
+        <div class="cluster-pill" title="Audit and execution persistence">
+          <span class="status-dot"></span> Postgres 16
+        </div>
+        <div class="cluster-pill" title="Watchdog crash detector and idempotent recovery">
+          <span class="status-dot"></span> Watchdog Active
+        </div>
+      </div>
+
+      <!-- Auth Key Input -->
+      <div class="auth-controls">
+        <div class="auth-input-wrapper">
+          <span>KEY</span>
+          <input type="text" id="api-key-input" value="test-api-key-dev-only" spellcheck="false" autocomplete="off">
+        </div>
       </div>
     </header>
 
-    <!-- Code Editor -->
-    <div class="editor-panel">
-      <div class="editor-titlebar">
-        <div class="dots"><span></span><span></span><span></span></div>
-        <span class="filename">snippet.py</span>
-        <span class="lang-badge">Python</span>
+    <!-- Workspace View Navigation Tabs -->
+    <nav class="nav-tabs">
+      <button class="tab-btn active" data-tab="studio">⚡ Code Studio</button>
+      <button class="tab-btn" data-tab="metrics">📊 Cluster &amp; Telemetry</button>
+      <button class="tab-btn" data-tab="security">🛡️ 8-Kernel Sandbox</button>
+      <button class="tab-btn" data-tab="history">📜 Execution History</button>
+    </nav>
+
+    <!-- ================================================================
+         TAB 1: Code Studio Workspace
+         ================================================================ -->
+    <main class="tab-view active" id="tab-studio">
+      <div class="studio-grid">
+
+        <!-- Code Editor Panel -->
+        <section class="panel">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span>Source Editor</span>
+              <span id="active-filename" style="font-family: var(--font-mono); color: var(--accent-hover);">main.py</span>
+            </div>
+            <div class="panel-actions">
+              <select id="language-select" class="select-dropdown">
+                <option value="python">Python 3.12</option>
+                <option value="javascript">Node.js 20</option>
+                <option value="cpp">C++17 (g++ 13)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Presets Strip -->
+          <div class="preset-strip">
+            <span class="preset-strip-label">Presets:</span>
+            <button class="preset-chip" data-preset="hello">Hello World</button>
+            <button class="preset-chip" data-preset="stream">⚡ Live Stream Demo</button>
+            <button class="preset-chip" data-preset="compute">Fibonacci Compute</button>
+            <button class="preset-chip danger" data-preset="timeout">⏱ Timeout Test</button>
+            <button class="preset-chip danger" data-preset="oom">💥 Memory Bomb</button>
+            <button class="preset-chip danger" data-preset="fork">💣 Fork Bomb</button>
+            <button class="preset-chip danger" data-preset="airgap">🌐 Network Airgap</button>
+          </div>
+
+          <!-- Editor Body with line numbers -->
+          <div class="editor-container">
+            <div class="line-numbers" id="line-numbers">1</div>
+            <textarea
+              id="code-editor"
+              class="code-textarea"
+              placeholder="# Enter your untrusted code here..."
+              spellcheck="false"
+              autocomplete="off"
+            ></textarea>
+          </div>
+
+          <!-- Editor Footer -->
+          <div class="editor-footer">
+            <div class="meta-metrics">
+              <span id="char-counter">0 / 10,000 chars</span>
+              <span>•</span>
+              <span>Press <kbd style="background:var(--bg-elevated); padding:2px 5px; border-radius:3px;">Cmd/Ctrl + Enter</kbd> to Run</span>
+            </div>
+            <button id="btn-submit" class="btn-run">
+              <span class="btn-text">▶ Run Code</span>
+              <span class="spinner"></span>
+            </button>
+          </div>
+        </section>
+
+        <!-- Live Streaming Terminal Console -->
+        <section class="terminal-panel">
+          <div class="terminal-header">
+            <div class="terminal-tabs">
+              <button class="term-tab active" data-stream="output">Live Output</button>
+              <button class="term-tab" data-stream="compile" id="tab-compile" style="display:none;">Compilation Log</button>
+              <button class="term-tab" data-stream="raw">Raw JSON</button>
+            </div>
+            <div class="live-status-indicator">
+              <span class="state-badge" id="execution-state-badge">IDLE</span>
+            </div>
+          </div>
+
+          <div class="terminal-body" id="terminal-scroll">
+            <div class="terminal-stream empty" id="terminal-content">Waiting for execution...</div>
+            <span class="stream-cursor" id="stream-cursor" style="display:none;"></span>
+          </div>
+
+          <div class="terminal-footer-meta">
+            <div class="meta-pill">
+              <span>Status:</span>
+              <span class="meta-val" id="meta-status">—</span>
+            </div>
+            <div class="meta-pill">
+              <span>Exit Code:</span>
+              <span class="meta-val" id="meta-exit">—</span>
+            </div>
+            <div class="meta-pill">
+              <span>Wall-Clock:</span>
+              <span class="meta-val" id="meta-runtime">—</span>
+            </div>
+            <div class="meta-pill">
+              <span>Req ID:</span>
+              <span class="meta-val" id="meta-request-id" style="font-size:10px; max-width:110px; overflow:hidden; text-overflow:ellipsis;">—</span>
+            </div>
+          </div>
+        </section>
+
       </div>
-      <textarea
-        id="code-editor"
-        placeholder="# Write your Python code here&#10;print('hello world')"
-        spellcheck="false"
-        autocomplete="off"
-        autocorrect="off"
-        autocapitalize="off"
-      ></textarea>
-    </div>
+    </main>
 
-    <!-- Action Bar -->
-    <div class="action-bar">
-      <span class="char-count" id="char-count">0 / 10,000</span>
-      <button id="submit-btn" type="button">
-        <span class="btn-text">▶ Run Code</span>
-        <span class="spinner"></span>
-      </button>
-    </div>
-
-    <!-- Status Section -->
-    <div class="status-section" id="status-section">
-      <div class="status-row">
-        <span class="status-badge" id="status-badge">
-          <span class="pulse-dot"></span>
-          <span class="status-text">pending</span>
-        </span>
-        <span class="status-id" id="status-id"></span>
-        <span class="status-timer" id="status-timer"></span>
-      </div>
-    </div>
-
-    <!-- Error Toast -->
-    <div class="error-toast" id="error-toast"></div>
-
-    <!-- Result Panel -->
-    <div class="result-panel" id="result-panel">
-      <div class="result-card">
-        <div class="result-header">
-          <span>Execution Result</span>
-          <div class="result-meta" id="result-meta"></div>
+    <!-- ================================================================
+         TAB 2: Cluster & Metrics Telemetry
+         ================================================================ -->
+    <main class="tab-view" id="tab-metrics">
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-card-title">
+            <span>FIFO Queue Depth</span>
+            <span style="color:var(--cyan);">exec:queue</span>
+          </div>
+          <div class="metric-card-val" id="telemetry-queue-depth">0</div>
+          <div class="metric-subtext">Waiting jobs in Redis FIFO list. Max Backpressure capacity: 100</div>
         </div>
-        <div class="output-block stdout" id="stdout-block">
-          <span class="output-label">stdout</span>
-          <pre id="stdout-output"></pre>
+
+        <div class="metric-card">
+          <div class="metric-card-title">
+            <span>Dead-Letter Queue</span>
+            <span style="color:var(--rose);">exec:dlq</span>
+          </div>
+          <div class="metric-card-val" id="telemetry-dlq-depth">0</div>
+          <div class="metric-subtext">Exhausted retry jobs isolated by watchdog crash recovery</div>
         </div>
-        <div class="output-block stderr" id="stderr-block">
-          <span class="output-label">stderr</span>
-          <pre id="stderr-output"></pre>
+
+        <div class="metric-card">
+          <div class="metric-card-title">
+            <span>Prometheus Scrape</span>
+            <span style="color:var(--emerald);">/metrics</span>
+          </div>
+          <div class="metric-card-val" id="telemetry-total-obs">0</div>
+          <div class="metric-subtext">Total execution observations recorded across cluster replicas</div>
         </div>
       </div>
-    </div>
 
-    <!-- Footer -->
-    <footer class="footer">
-      Sandboxed Code Execution Engine &middot; Built with Node.js, Docker, Redis &amp; PostgreSQL
+      <div class="panel" style="margin-top: 16px;">
+        <div class="panel-header">
+          <span class="panel-title">Execution Duration Metrics (Histogram Breakdown)</span>
+          <button class="preset-chip" id="btn-refresh-metrics">⟳ Refresh Telemetry</button>
+        </div>
+        <div style="overflow-x: auto;">
+          <table class="latency-table">
+            <thead>
+              <tr>
+                <th>Language</th>
+                <th>Terminal Status</th>
+                <th>Total Executions</th>
+                <th>Total Time (ms)</th>
+                <th>Avg Latency (ms)</th>
+              </tr>
+            </thead>
+            <tbody id="metrics-table-body">
+              <tr>
+                <td colspan="5" style="text-align:center; color:var(--text-muted);">No metrics collected yet. Run a few submissions to generate telemetry.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+
+    <!-- ================================================================
+         TAB 3: 8 Kernel Security Matrix
+         ================================================================ -->
+    <main class="tab-view" id="tab-security">
+      <div class="panel" style="margin-bottom:16px;">
+        <div class="panel-header">
+          <span class="panel-title">8 Kernel-Enforced Docker Sandbox Security Constraints</span>
+        </div>
+        <div style="padding:16px; font-size:13px; color:var(--text-secondary);">
+          Every container created across all 3 languages (Python, Node.js, C++) is strictly governed by these 8 immutable kernel isolation flags.
+        </div>
+      </div>
+
+      <div class="security-matrix-grid">
+        <div class="sec-card">
+          <div class="sec-card-header">
+            <span class="sec-card-flag">--memory=256m</span>
+          </div>
+          <div class="sec-card-desc">Hard RAM limit. Prevents memory leaks; kernel triggers OOM killer (Exit Code 137).</div>
+          <div class="sec-card-action">
+            <button class="btn-test-sec" onclick="loadAndRunPreset('oom')">Test Memory Limit</button>
+          </div>
+        </div>
+
+        <div class="sec-card">
+          <div class="sec-card-header">
+            <span class="sec-card-flag">--memory-swap=256m</span>
+          </div>
+          <div class="sec-card-desc">Swap is completely disabled. Containers cannot page memory to host storage.</div>
+        </div>
+
+        <div class="sec-card">
+          <div class="sec-card-header">
+            <span class="sec-card-flag">--pids-limit=50</span>
+          </div>
+          <div class="sec-card-desc">Caps max subprocesses / threads. Neutralizes fork bombs instantly.</div>
+          <div class="sec-card-action">
+            <button class="btn-test-sec" onclick="loadAndRunPreset('fork')">Test PID Limit</button>
+          </div>
+        </div>
+
+        <div class="sec-card">
+          <div class="sec-card-header">
+            <span class="sec-card-flag">--network=none</span>
+          </div>
+          <div class="sec-card-desc">Total network isolation. No outbound requests, data exfiltration, or socket binds.</div>
+          <div class="sec-card-action">
+            <button class="btn-test-sec" onclick="loadAndRunPreset('airgap')">Test Network Airgap</button>
+          </div>
+        </div>
+
+        <div class="sec-card">
+          <div class="sec-card-header">
+            <span class="sec-card-flag">--read-only</span>
+          </div>
+          <div class="sec-card-desc">Root filesystem is mounted read-only. Malicious binaries cannot alter container image files.</div>
+        </div>
+
+        <div class="sec-card">
+          <div class="sec-card-header">
+            <span class="sec-card-flag">--tmpfs /sandbox:16m</span>
+          </div>
+          <div class="sec-card-desc">RAM-backed 16MB temporary directory. The only writable path, wiped on container destruction.</div>
+        </div>
+
+        <div class="sec-card">
+          <div class="sec-card-header">
+            <span class="sec-card-flag">--user=65534</span>
+          </div>
+          <div class="sec-card-desc">Runs as non-root UID 65534 (`nobody`). Prevents privilege escalation vulnerabilities.</div>
+        </div>
+
+        <div class="sec-card">
+          <div class="sec-card-header">
+            <span class="sec-card-flag">--cap-drop=ALL</span>
+          </div>
+          <div class="sec-card-desc">Drops all 38+ Linux kernel capabilities (chown, dac_override, sys_admin, etc.).</div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ================================================================
+         TAB 4: Execution History
+         ================================================================ -->
+    <main class="tab-view" id="tab-history">
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Session Execution Log</span>
+          <button class="preset-chip" id="btn-clear-history">Clear History</button>
+        </div>
+        <div style="overflow-x: auto;">
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Language</th>
+                <th>Status</th>
+                <th>Exit Code</th>
+                <th>Runtime</th>
+                <th>Job ID</th>
+                <th>Request ID</th>
+              </tr>
+            </thead>
+            <tbody id="history-table-body">
+              <tr>
+                <td colspan="7" style="text-align:center; color:var(--text-muted);">No executions recorded in this session.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- App Footer -->
+    <footer class="site-footer">
+      Distributed Code Execution Engine v2 &middot; Node.js, Express, Dockerode, Redis FIFO, PostgreSQL 16, Prometheus &amp; WebSockets
     </footer>
   </div>
 
+  <!-- ================================================================
+       Client Application Logic
+       ================================================================ -->
   <script>
-    // ================================================================
-    // DOM References
-    // ================================================================
-    const codeEditor    = document.getElementById('code-editor');
-    const charCount     = document.getElementById('char-count');
-    const submitBtn     = document.getElementById('submit-btn');
-    const apiKeyInput   = document.getElementById('api-key-input');
-    const statusSection = document.getElementById('status-section');
-    const statusBadge   = document.getElementById('status-badge');
-    const statusText    = statusBadge.querySelector('.status-text');
-    const statusId      = document.getElementById('status-id');
-    const statusTimer   = document.getElementById('status-timer');
-    const errorToast    = document.getElementById('error-toast');
-    const resultPanel   = document.getElementById('result-panel');
-    const resultMeta    = document.getElementById('result-meta');
-    const stdoutOutput  = document.getElementById('stdout-output');
-    const stderrOutput  = document.getElementById('stderr-output');
-    const stdoutBlock   = document.getElementById('stdout-block');
-    const stderrBlock   = document.getElementById('stderr-block');
+    // ---------------------------------------------------------------------------
+    // Configuration & Presets
+    // ---------------------------------------------------------------------------
+    const FILENAMES = {
+      python: 'main.py',
+      javascript: 'main.js',
+      cpp: 'main.cpp',
+    };
 
-    // ================================================================
+    const TEMPLATES = {
+      python: `# Python 3.12 Sandbox Demo
+import sys
+
+def compute_fibonacci(n):
+    a, b = 0, 1
+    for _ in range(n):
+        a, b = b, a + b
+    return a
+
+print(f"Python Sandbox Initialized: {sys.version}")
+print(f"Fibonacci(20) = {compute_fibonacci(20)}")
+`,
+      javascript: `// Node.js 20 Sandbox Demo
+const start = Date.now();
+const numbers = Array.from({ length: 5 }, (_, i) => i + 1);
+const squares = numbers.map(n => n * n);
+
+console.log('Node.js 20 Sandbox Ready');
+console.log('Processed Squares:', squares);
+console.log('Execution benchmarked in ms:', Date.now() - start);
+`,
+      cpp: `// C++17 (g++ 13) Sandbox Demo
+#include <iostream>
+#include <vector>
+#include <numeric>
+
+int main() {
+    std::vector<int> data = {10, 20, 30, 40, 50};
+    int total = std::accumulate(data.begin(), data.end(), 0);
+    
+    std::cout << "C++17 Sandboxed Runner Output:" << std::endl;
+    std::cout << "Sum of elements = " << total << std::endl;
+    return 0;
+}
+`,
+    };
+
+    const CHAOS_PRESETS = {
+      stream: {
+        python: `import time, sys
+
+print("Initializing live streaming task...")
+sys.stdout.flush()
+
+for i in range(1, 6):
+    time.sleep(0.6)
+    print(f"-> Processing chunk #{i} in real-time over WebSocket")
+    sys.stdout.flush()
+
+print("Streaming completed successfully.")
+`,
+        javascript: `console.log("Starting real-time async stream...");
+let count = 1;
+const interval = setInterval(() => {
+    console.log(\`-> Live streaming step \${count} of 5\`);
+    count++;
+    if (count > 5) {
+        clearInterval(interval);
+        console.log("Async live stream complete.");
+    }
+}, 600);
+`,
+        cpp: `#include <iostream>
+#include <chrono>
+#include <thread>
+
+int main() {
+    std::cout << "Streaming from compiled C++ binary..." << std::endl;
+    for (int i = 1; i <= 5; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(600));
+        std::cout << "-> C++ live tick " << i << std::endl;
+    }
+    std::cout << "Done." << std::endl;
+    return 0;
+}
+`
+      },
+      compute: {
+        python: `def fib(n):
+    if n <= 1: return n
+    return fib(n-1) + fib(n-2)
+
+print("Computing recursive Fibonacci(30)...")
+print("Result:", fib(30))
+`,
+        javascript: `function fib(n) {
+    if (n <= 1) return n;
+    return fib(n-1) + fib(n-2);
+}
+console.log("Computing Fibonacci(32)...");
+console.log("Result:", fib(32));
+`,
+        cpp: `#include <iostream>
+
+long long fib(int n) {
+    if (n <= 1) return n;
+    return fib(n-1) + fib(n-2);
+}
+
+int main() {
+    std::cout << "Computing Fibonacci(35)..." << std::endl;
+    std::cout << "Result: " << fib(35) << std::endl;
+    return 0;
+}
+`
+      },
+      timeout: {
+        python: `import time
+print("Starting infinite loop to trigger 10s hard timeout...")
+while True:
+    time.sleep(1)
+`,
+        javascript: `console.log("Starting synchronous spinlock to trigger 10s timeout...");
+while(true) {}
+`,
+        cpp: `#include <iostream>
+int main() {
+    std::cout << "Triggering hard timeout..." << std::endl;
+    while(true) {}
+    return 0;
+}
+`
+      },
+      oom: {
+        python: `print("Allocating memory beyond 256MB limit to trigger OOM (Exit 137)...")
+chunks = []
+while True:
+    chunks.append(b'x' * (50 * 1024 * 1024))
+`,
+        javascript: `console.log("Allocating memory to trigger OOM...");
+const chunks = [];
+while (true) {
+    chunks.push(Buffer.alloc(50 * 1024 * 1024));
+}
+`,
+        cpp: `#include <iostream>
+#include <vector>
+
+int main() {
+    std::cout << "Exhausting 256MB RAM cap..." << std::endl;
+    std::vector<std::vector<char>> memory;
+    while(true) {
+        memory.emplace_back(50 * 1024 * 1024, 'x');
+    }
+    return 0;
+}
+`
+      },
+      fork: {
+        python: `import os
+print("Fork bomb attempt - restricted by --pids-limit=50")
+while True:
+    try:
+        os.fork()
+    except Exception as e:
+        print(f"Fork prevented by kernel limit: {e}")
+        break
+`,
+        javascript: `const { fork } = require('child_process');
+console.log("Subprocess spawning test...");
+for (let i = 0; i < 100; i++) {
+    try { fork(__filename); } catch (err) { console.log("Blocked:", err.message); }
+}
+`,
+        cpp: `#include <iostream>
+#include <unistd.h>
+
+int main() {
+    std::cout << "Testing PID cap limit..." << std::endl;
+    for(int i = 0; i < 100; ++i) {
+        fork();
+    }
+    return 0;
+}
+`
+      },
+      airgap: {
+        python: `import urllib.request
+print("Attempting network connection to https://google.com...")
+try:
+    urllib.request.urlopen("https://google.com", timeout=3)
+except Exception as e:
+    print(f"Network blocked by --network=none sandbox constraint: {e}")
+`,
+        javascript: `const https = require('https');
+console.log("Attempting outbound HTTPS request...");
+const req = https.get('https://google.com', (res) => {
+    console.log("Response:", res.statusCode);
+});
+req.on('error', (err) => {
+    console.log("Network access blocked by container sandbox:", err.message);
+});
+`,
+        cpp: `#include <iostream>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+
+int main() {
+    std::cout << "Opening raw TCP socket on isolated network namespace..." << std::endl;
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        std::cout << "Socket creation failed." << std::endl;
+        return 1;
+    }
+    sockaddr_in serv_addr{};
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(80);
+    inet_pton(AF_INET, "8.8.8.8", &serv_addr.sin_addr);
+    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        std::cout << "Network connection blocked by kernel sandbox (--network=none)." << std::endl;
+    }
+    close(sock);
+    return 0;
+}
+`
+      }
+    };
+
+    // ---------------------------------------------------------------------------
+    // DOM Elements
+    // ---------------------------------------------------------------------------
+    const languageSelect   = document.getElementById('language-select');
+    const activeFilename   = document.getElementById('active-filename');
+    const codeEditor       = document.getElementById('code-editor');
+    const lineNumbers      = document.getElementById('line-numbers');
+    const charCounter      = document.getElementById('char-counter');
+    const btnSubmit        = document.getElementById('btn-submit');
+    const apiKeyInput      = document.getElementById('api-key-input');
+    const terminalContent  = document.getElementById('terminal-content');
+    const streamCursor     = document.getElementById('stream-cursor');
+    const terminalScroll   = document.getElementById('terminal-scroll');
+    const executionState   = document.getElementById('execution-state-badge');
+    const metaStatus       = document.getElementById('meta-status');
+    const metaExit         = document.getElementById('meta-exit');
+    const metaRuntime      = document.getElementById('meta-runtime');
+    const metaRequestId    = document.getElementById('meta-request-id');
+    const tabCompile       = document.getElementById('tab-compile');
+    const toastContainer   = document.getElementById('toast-container');
+    const historyTableBody = document.getElementById('history-table-body');
+    const metricsTableBody = document.getElementById('metrics-table-body');
+
+    // ---------------------------------------------------------------------------
     // State
-    // ================================================================
-    let pollInterval = null;
-    let timerInterval = null;
-    let startTime = null;
-    let outputSocket = null;
+    // ---------------------------------------------------------------------------
     let activeJobId = null;
-    let jobCompleted = false;
+    let outputSocket = null;
+    let pollInterval = null;
+    let timerStartTime = null;
+    let timerInterval = null;
+    let lastExecutionData = null;
+    let currentStreamTab = 'output';
+    const sessionHistory = [];
 
-    // ================================================================
-    // Character Counter
-    // ================================================================
+    // ---------------------------------------------------------------------------
+    // Initialization
+    // ---------------------------------------------------------------------------
+    function init() {
+      // Set initial editor content
+      codeEditor.value = TEMPLATES.python;
+      updateLineNumbers();
+      updateCharCounter();
+      setupTabs();
+      setupPresets();
+      setupEditorShortcuts();
+      setupMetrics();
+    }
+
+    // Line Numbers & Sizing
+    function updateLineNumbers() {
+      const lines = codeEditor.value.split('\n').length;
+      lineNumbers.innerHTML = Array.from({ length: lines }, (_, i) => i + 1).join('<br>');
+    }
+
+    function updateCharCounter() {
+      const count = codeEditor.value.length;
+      charCounter.textContent = `${count.toLocaleString()} / 10,000 chars`;
+    }
+
     codeEditor.addEventListener('input', () => {
-      const len = codeEditor.value.length;
-      charCount.textContent = `${len.toLocaleString()} / 10,000`;
+      updateLineNumbers();
+      updateCharCounter();
     });
 
-    // ================================================================
-    // Tab Key Support in Textarea
-    // ================================================================
-    codeEditor.addEventListener('keydown', (e) => {
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        const start = codeEditor.selectionStart;
-        const end = codeEditor.selectionEnd;
-        codeEditor.value = codeEditor.value.substring(0, start) + '    ' + codeEditor.value.substring(end);
-        codeEditor.selectionStart = codeEditor.selectionEnd = start + 4;
+    codeEditor.addEventListener('scroll', () => {
+      lineNumbers.scrollTop = codeEditor.scrollTop;
+    });
+
+    languageSelect.addEventListener('change', () => {
+      const lang = languageSelect.value;
+      activeFilename.textContent = FILENAMES[lang] || 'main.txt';
+      codeEditor.value = TEMPLATES[lang] || '';
+      updateLineNumbers();
+      updateCharCounter();
+    });
+
+    // ---------------------------------------------------------------------------
+    // Navigation Tabs
+    // ---------------------------------------------------------------------------
+    function setupTabs() {
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.tab-view').forEach(v => v.classList.remove('active'));
+          btn.classList.add('active');
+          const target = document.getElementById(`tab-${btn.dataset.tab}`);
+          if (target) target.classList.add('active');
+
+          if (btn.dataset.tab === 'metrics') {
+            fetchMetrics();
+          }
+        });
+      });
+
+      // Terminal Sub-tabs
+      document.querySelectorAll('.term-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          document.querySelectorAll('.term-tab').forEach(t => t.classList.remove('active'));
+          tab.classList.add('active');
+          currentStreamTab = tab.dataset.stream;
+          renderTerminalView();
+        });
+      });
+    }
+
+    // ---------------------------------------------------------------------------
+    // Presets
+    // ---------------------------------------------------------------------------
+    function setupPresets() {
+      document.querySelectorAll('.preset-chip[data-preset]').forEach(chip => {
+        chip.addEventListener('click', () => {
+          const presetKey = chip.dataset.preset;
+          loadPreset(presetKey);
+        });
+      });
+    }
+
+    function loadPreset(presetKey) {
+      const lang = languageSelect.value;
+      if (presetKey === 'hello') {
+        codeEditor.value = TEMPLATES[lang];
+      } else if (CHAOS_PRESETS[presetKey] && CHAOS_PRESETS[presetKey][lang]) {
+        codeEditor.value = CHAOS_PRESETS[presetKey][lang];
       }
-    });
-
-    // ================================================================
-    // Helpers
-    // ================================================================
-
-    /** @returns {string} */
-    function getApiKey() {
-      return apiKeyInput.value.trim();
+      updateLineNumbers();
+      updateCharCounter();
+      showToast(`Loaded ${presetKey.toUpperCase()} preset for ${lang}`, 'success');
     }
 
-    /**
-     * @param {string} message
-     * @returns {void}
-     */
-    function showError(message) {
-      errorToast.innerHTML = message;
-      errorToast.classList.add('visible');
+    window.loadAndRunPreset = function(presetKey) {
+      // Switch back to Studio tab
+      document.querySelector('.tab-btn[data-tab="studio"]').click();
+      loadPreset(presetKey);
+      executeCode();
+    };
+
+    // ---------------------------------------------------------------------------
+    // Keyboard Shortcuts
+    // ---------------------------------------------------------------------------
+    function setupEditorShortcuts() {
+      codeEditor.addEventListener('keydown', (e) => {
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          const start = codeEditor.selectionStart;
+          const end = codeEditor.selectionEnd;
+          codeEditor.value = codeEditor.value.substring(0, start) + '    ' + codeEditor.value.substring(end);
+          codeEditor.selectionStart = codeEditor.selectionEnd = start + 4;
+          updateLineNumbers();
+        } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+          e.preventDefault();
+          executeCode();
+        }
+      });
+
+      btnSubmit.addEventListener('click', () => executeCode());
     }
 
-    /** @returns {void} */
-    function hideError() {
-      errorToast.classList.remove('visible');
-      errorToast.innerHTML = '';
+    // ---------------------------------------------------------------------------
+    // Toast Notification System
+    // ---------------------------------------------------------------------------
+    function showToast(message, type = 'info') {
+      const toast = document.createElement('div');
+      toast.className = `toast ${type}`;
+      toast.textContent = message;
+      toastContainer.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(20px)';
+        setTimeout(() => toast.remove(), 200);
+      }, 3500);
     }
 
-    /**
-     * @param {string} status
-     * @returns {void}
-     */
-    function setStatus(status) {
-      statusBadge.className = 'status-badge ' + status;
-      statusText.textContent = status;
-    }
+    // ---------------------------------------------------------------------------
+    // Execution & Streaming Controller
+    // ---------------------------------------------------------------------------
+    async function executeCode() {
+      const code = codeEditor.value;
+      const language = languageSelect.value;
+      const apiKey = apiKeyInput.value.trim();
 
-    /** @returns {void} */
-    function startTimer() {
-      startTime = Date.now();
+      if (!code.trim()) {
+        showToast('Please enter some code before running.', 'warning');
+        return;
+      }
+      if (!apiKey) {
+        showToast('API Key is required in the top header field.', 'error');
+        return;
+      }
+
+      // Reset Terminal UI & States
+      btnSubmit.classList.add('loading');
+      btnSubmit.disabled = true;
+      setExecutionState('pending');
+      terminalContent.textContent = '';
+      terminalContent.classList.remove('empty');
+      streamCursor.style.display = 'inline-block';
+      metaStatus.textContent = 'pending';
+      metaExit.textContent = '—';
+      metaRuntime.textContent = '0.0s';
+      metaRequestId.textContent = '—';
+      tabCompile.style.display = 'none';
+      lastExecutionData = { stdout: '', stderr: '', compileStdout: '', compileStderr: '', exitCode: null, runtimeMs: null };
+
+      if (outputSocket) outputSocket.close();
+      if (pollInterval) clearInterval(pollInterval);
+      if (timerInterval) clearInterval(timerInterval);
+
+      timerStartTime = Date.now();
       timerInterval = setInterval(() => {
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        statusTimer.textContent = elapsed + 's';
+        const sec = ((Date.now() - timerStartTime) / 1000).toFixed(1);
+        metaRuntime.textContent = `${sec}s`;
       }, 100);
-    }
 
-    /** @returns {void} */
-    function stopTimer() {
-      if (timerInterval) {
-        clearInterval(timerInterval);
-        timerInterval = null;
+      try {
+        const response = await fetch('/submit', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+          },
+          body: JSON.stringify({ code, language }),
+        });
+
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          if (response.status === 401) {
+            throw new Error('Unauthorized — Invalid or missing API key.');
+          } else if (response.status === 429) {
+            throw new Error('Rate limit exceeded — Token bucket empty, please wait.');
+          } else if (response.status === 503) {
+            const retryAfter = response.headers.get('Retry-After') || '30';
+            throw new Error(`Queue Backpressure (503): System at capacity. Retry in ${retryAfter}s.`);
+          } else {
+            throw new Error(body?.error || `Server error (${response.status})`);
+          }
+        }
+
+        const data = await response.json();
+        activeJobId = data.id;
+        metaRequestId.textContent = data.requestId || '—';
+        metaRequestId.title = `Request UUID: ${data.requestId}`;
+
+        // Connect WebSocket live stream
+        connectWebSocket(data.id, apiKey);
+        // Start REST polling fallback
+        startPolling(data.id, apiKey);
+
+      } catch (err) {
+        finalizeExecution(null, err.message);
       }
     }
 
-    /**
-     * @param {string} url
-     * @param {RequestInit} [options]
-     * @returns {Promise<Response>}
-     */
-    async function apiFetch(url, options) {
-      const key = getApiKey();
-      const headers = { ...(options && options.headers ? options.headers : {}), 'x-api-key': key };
-      return fetch(url, { ...options, headers });
-    }
-
-    /**
-     * @param {{ stdout?: string, stderr?: string, exitCode?: number, runtimeMs?: number, timedOut?: boolean }} data
-     * @returns {void}
-     */
-    function renderResult(data) {
-      const metaParts = [];
-      metaParts.push('<span class="meta-item"><span class="meta-label">exit: </span>' + escapeHtml(String(data.exitCode ?? '—')) + '</span>');
-      metaParts.push('<span class="meta-item"><span class="meta-label">time: </span>' + escapeHtml(String(data.runtimeMs ?? '—')) + 'ms</span>');
-      if (data.timedOut) {
-        metaParts.push('<span class="meta-item" style="color:var(--red)">⏱ timed out</span>');
-      }
-      resultMeta.innerHTML = metaParts.join('');
-
-      if (data.stdout && data.stdout.trim()) {
-        stdoutOutput.textContent = data.stdout;
-        stdoutBlock.classList.remove('empty');
-      } else {
-        stdoutOutput.textContent = '(no output)';
-        stdoutBlock.classList.add('empty');
-      }
-
-      if (data.stderr && data.stderr.trim()) {
-        stderrOutput.textContent = data.stderr;
-        stderrBlock.classList.remove('empty');
-        stderrBlock.style.display = 'block';
-      } else {
-        stderrBlock.style.display = 'none';
-      }
-
-      resultPanel.classList.add('visible');
-    }
-
-    /**
-     * @param {string} jobId
-     * @param {{ stdout?: string, stderr?: string, exitCode?: number, runtimeMs?: number, timedOut?: boolean }} [result]
-     * @returns {Promise<void>}
-     */
-    async function completeJob(jobId, result) {
-      if (jobCompleted || activeJobId !== jobId) return;
-      jobCompleted = true;
-      if (pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
-      }
-      stopTimer();
-      submitBtn.classList.remove('loading');
-      submitBtn.disabled = false;
-      if (outputSocket && outputSocket.readyState === WebSocket.OPEN) outputSocket.close();
-
-      if (result) {
-        renderResult(result);
-      } else {
-        await fetchResult(jobId);
-      }
-    }
-
-    /**
-     * @param {string} jobId
-     * @returns {void}
-     */
-    function openOutputSocket(jobId) {
+    // WebSocket Stream Client
+    function connectWebSocket(jobId, apiKey) {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const query = new URLSearchParams({ id: jobId, apiKey: getApiKey() });
-      outputSocket = new WebSocket(`${protocol}//${window.location.host}/ws?${query.toString()}`);
+      const wsUrl = `${protocol}//${window.location.host}/ws?id=${jobId}&apiKey=${encodeURIComponent(apiKey)}`;
+      
+      outputSocket = new WebSocket(wsUrl);
 
       outputSocket.onmessage = (event) => {
         try {
-          const message = JSON.parse(event.data);
-          if (message.type === 'output' && message.stream === 'stdout') {
-            resultPanel.classList.add('visible');
-            stdoutOutput.textContent += message.chunk;
-            stdoutBlock.classList.remove('empty');
-            stderrBlock.style.display = 'none';
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'output') {
+            setExecutionState('running');
+            lastExecutionData.stdout += msg.chunk;
+            if (currentStreamTab === 'output') {
+              terminalContent.textContent += msg.chunk;
+              terminalScroll.scrollTop = terminalScroll.scrollHeight;
+            }
+          } else if (msg.type === 'done') {
+            finalizeExecution(msg.result);
           }
-          if (message.type === 'done') completeJob(jobId, message.result);
-        } catch (err) {
-          showError('Received an invalid live-output message. Polling will continue.');
+        } catch (e) {
+          console.warn('Malformed WS message:', e);
         }
       };
 
       outputSocket.onerror = () => {
-        // The established REST polling interval remains the fallback transport.
+        // Fallback polling handles result if WS fails
       };
     }
 
-    /**
-     * @param {string} jobId
-     * @returns {void}
-     */
-    function startStatusPolling(jobId) {
+    // REST Polling Fallback
+    function startPolling(jobId, apiKey) {
       pollInterval = setInterval(async () => {
         try {
-          const pollRes = await apiFetch('/status/' + jobId);
-          if (!pollRes.ok) throw new Error('Status poll failed (' + pollRes.status + ')');
-          const pollData = await pollRes.json();
-          setStatus(pollData.status);
-          if (pollData.status === 'done' || pollData.status === 'failed' || pollData.status === 'timeout') {
-            await completeJob(jobId);
-          }
-        } catch (err) {
-          if (pollInterval) {
+          const res = await fetch(`/status/${jobId}`, {
+            headers: { 'x-api-key': apiKey },
+          });
+          if (!res.ok) return;
+          const statusData = await res.json();
+          setExecutionState(statusData.status);
+
+          if (['done', 'failed', 'timeout'].includes(statusData.status)) {
             clearInterval(pollInterval);
             pollInterval = null;
+            // Fetch final result
+            const resultRes = await fetch(`/result/${jobId}`, {
+              headers: { 'x-api-key': apiKey },
+            });
+            if (resultRes.ok) {
+              const fullResult = await resultRes.json();
+              finalizeExecution(fullResult);
+            }
           }
-          if (!jobCompleted) showError('Polling error: ' + (err instanceof Error ? err.message : String(err)));
+        } catch (e) {
+          // Keep polling
         }
-      }, 2000);
+      }, 1500);
     }
 
-    // ================================================================
-    // Submit Flow
-    // ================================================================
-    submitBtn.addEventListener('click', async () => {
-      const code = codeEditor.value;
+    // Finalize Job Lifecycle
+    function finalizeExecution(result, errorMessage = null) {
+      if (timerInterval) clearInterval(timerInterval);
+      if (pollInterval) clearInterval(pollInterval);
+      if (outputSocket && outputSocket.readyState === WebSocket.OPEN) outputSocket.close();
 
-      // Validation
-      if (!code.trim()) {
-        showError('Please enter some Python code to run.');
+      btnSubmit.classList.remove('loading');
+      btnSubmit.disabled = false;
+      streamCursor.style.display = 'none';
+
+      if (errorMessage) {
+        setExecutionState('failed');
+        terminalContent.textContent = `Execution Error: ${errorMessage}`;
+        metaStatus.textContent = 'error';
+        showToast(errorMessage, 'error');
         return;
       }
-      if (code.length > 10000) {
-        showError('Code exceeds the 10,000 character limit.');
-        return;
+
+      lastExecutionData = result;
+      setExecutionState(result.status || 'done');
+      metaStatus.textContent = result.status || 'done';
+      metaExit.textContent = result.exitCode !== null ? result.exitCode : '—';
+      metaExit.className = `meta-val ${result.exitCode === 0 ? 'success' : 'danger'}`;
+      metaRuntime.textContent = `${result.runtimeMs || 0}ms`;
+
+      if (result.compileStdout || result.compileStderr) {
+        tabCompile.style.display = 'inline-block';
       }
-      if (!getApiKey()) {
-        showError('API key is required. Enter it in the field above.');
-        return;
+
+      renderTerminalView();
+
+      // Add to session execution history
+      const historyItem = {
+        time: new Date().toLocaleTimeString(),
+        language: languageSelect.value,
+        status: result.status || 'done',
+        exitCode: result.exitCode,
+        runtimeMs: result.runtimeMs,
+        jobId: activeJobId,
+        requestId: metaRequestId.textContent,
+        data: result,
+      };
+      sessionHistory.unshift(historyItem);
+      renderHistoryTable();
+
+      showToast(`Job ${result.status} (exit ${result.exitCode}) in ${result.runtimeMs}ms`, result.exitCode === 0 ? 'success' : 'warning');
+    }
+
+    function setExecutionState(state) {
+      executionState.className = `state-badge ${state}`;
+      executionState.textContent = state.toUpperCase();
+    }
+
+    function renderTerminalView() {
+      if (!lastExecutionData) return;
+
+      if (currentStreamTab === 'output') {
+        const out = [lastExecutionData.stdout, lastExecutionData.stderr].filter(Boolean).join('\n[STDERR]\n');
+        terminalContent.textContent = out || '(no standard output produced)';
+      } else if (currentStreamTab === 'compile') {
+        const comp = [lastExecutionData.compileStdout, lastExecutionData.compileStderr].filter(Boolean).join('\n[COMPILE ERRORS]\n');
+        terminalContent.textContent = comp || '(no compilation messages)';
+      } else if (currentStreamTab === 'raw') {
+        terminalContent.textContent = JSON.stringify(lastExecutionData, null, 2);
       }
+      terminalScroll.scrollTop = terminalScroll.scrollHeight;
+    }
 
-      // Reset UI
-      hideError();
-      if (outputSocket) outputSocket.close();
-      activeJobId = null;
-      jobCompleted = false;
-      resultPanel.classList.remove('visible');
-      stdoutOutput.textContent = '';
-      stderrOutput.textContent = '';
-      statusSection.classList.add('visible');
-      setStatus('pending');
-      statusId.textContent = '';
-      statusTimer.textContent = '0.0s';
-      submitBtn.classList.add('loading');
-      submitBtn.disabled = true;
+    // ---------------------------------------------------------------------------
+    // Telemetry & Metrics (Prometheus Parsing)
+    // ---------------------------------------------------------------------------
+    function setupMetrics() {
+      document.getElementById('btn-refresh-metrics').addEventListener('click', fetchMetrics);
+    }
 
-      startTimer();
-
+    async function fetchMetrics() {
       try {
-        // POST /submit
-        const submitRes = await apiFetch('/submit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code, language: 'python' }),
-        });
+        const res = await fetch('/metrics');
+        if (!res.ok) return;
+        const text = await res.text();
+        parseAndDisplayMetrics(text);
+      } catch (err) {
+        console.warn('Metrics collection error:', err);
+      }
+    }
 
-        if (!submitRes.ok) {
-          const body = await submitRes.json().catch(() => null);
-          if (submitRes.status === 401) {
-            throw new Error('Unauthorized — check your API key.');
-          } else if (submitRes.status === 429) {
-            throw new Error('Rate limit exceeded — wait a moment and try again.');
-          } else if (submitRes.status === 400) {
-            const details = body && body.details ? JSON.stringify(body.details) : (body && body.error ? body.error : 'Bad request');
-            throw new Error('Validation error: ' + details);
-          } else {
-            throw new Error('Server error (' + submitRes.status + '): ' + (body && body.error ? body.error : 'Unknown'));
+    function parseAndDisplayMetrics(promText) {
+      const lines = promText.split('\n');
+      let queueDepth = 0;
+      let dlqDepth = 0;
+      let totalObservations = 0;
+      const durationStats = {};
+
+      for (const line of lines) {
+        if (line.startsWith('#') || !line.trim()) continue;
+
+        if (line.startsWith('exec_queue_depth')) {
+          queueDepth = parseInt(line.split(' ')[1], 10) || 0;
+        } else if (line.startsWith('exec_dlq_depth')) {
+          dlqDepth = parseInt(line.split(' ')[1], 10) || 0;
+        } else if (line.startsWith('exec_execution_duration_ms_count')) {
+          const match = line.match(/language="([^"]+)",status="([^"]+)"\}\s+(\d+)/);
+          if (match) {
+            const [, lang, status, count] = match;
+            const key = `${lang}:${status}`;
+            if (!durationStats[key]) durationStats[key] = { lang, status, count: 0, sum: 0 };
+            durationStats[key].count = parseInt(count, 10);
+            totalObservations += durationStats[key].count;
+          }
+        } else if (line.startsWith('exec_execution_duration_ms_sum')) {
+          const match = line.match(/language="([^"]+)",status="([^"]+)"\}\s+([0-9.]+)/);
+          if (match) {
+            const [, lang, status, sum] = match;
+            const key = `${lang}:${status}`;
+            if (!durationStats[key]) durationStats[key] = { lang, status, count: 0, sum: 0 };
+            durationStats[key].sum = parseFloat(sum);
           }
         }
-
-        const submitData = await submitRes.json();
-        const jobId = submitData.id;
-        activeJobId = jobId;
-        statusId.textContent = jobId;
-        openOutputSocket(jobId);
-        startStatusPolling(jobId);
-
-      } catch (/** @type {unknown} */ err) {
-        stopTimer();
-        submitBtn.classList.remove('loading');
-        submitBtn.disabled = false;
-        showError(err instanceof Error ? err.message : String(err));
       }
+
+      document.getElementById('telemetry-queue-depth').textContent = queueDepth;
+      document.getElementById('telemetry-dlq-depth').textContent = dlqDepth;
+      document.getElementById('telemetry-total-obs').textContent = totalObservations;
+
+      // Render latency table
+      const rows = Object.values(durationStats);
+      if (rows.length === 0) {
+        metricsTableBody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">No metrics collected yet. Run a few submissions to generate telemetry.</td></tr>`;
+      } else {
+        metricsTableBody.innerHTML = rows.map(r => {
+          const avg = r.count > 0 ? (r.sum / r.count).toFixed(1) : '—';
+          return `
+            <tr>
+              <td style="font-weight:600; color:var(--text-primary);">${r.lang}</td>
+              <td><span class="state-badge ${r.status}">${r.status}</span></td>
+              <td>${r.count}</td>
+              <td>${r.sum.toFixed(1)} ms</td>
+              <td style="color:var(--cyan); font-weight:600;">${avg} ms</td>
+            </tr>
+          `;
+        }).join('');
+      }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Execution History Rendering
+    // ---------------------------------------------------------------------------
+    function renderHistoryTable() {
+      if (sessionHistory.length === 0) {
+        historyTableBody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted);">No executions recorded in this session.</td></tr>`;
+        return;
+      }
+
+      historyTableBody.innerHTML = sessionHistory.map((item, idx) => `
+        <tr onclick="loadHistoricalResult(${idx})">
+          <td>${item.time}</td>
+          <td><span style="color:var(--accent-hover); font-weight:500;">${item.language}</span></td>
+          <td><span class="state-badge ${item.status}">${item.status}</span></td>
+          <td class="${item.exitCode === 0 ? 'meta-val success' : 'meta-val danger'}">${item.exitCode !== null ? item.exitCode : '—'}</td>
+          <td>${item.runtimeMs || '—'} ms</td>
+          <td style="font-size:10px; color:var(--text-muted);">${item.jobId ? item.jobId.slice(0, 8) + '...' : '—'}</td>
+          <td style="font-size:10px; color:var(--text-muted);">${item.requestId ? item.requestId.slice(0, 8) + '...' : '—'}</td>
+        </tr>
+      `).join('');
+    }
+
+    window.loadHistoricalResult = function(index) {
+      const item = sessionHistory[index];
+      if (!item || !item.data) return;
+      lastExecutionData = item.data;
+      activeJobId = item.jobId;
+      setExecutionState(item.status);
+      metaStatus.textContent = item.status;
+      metaExit.textContent = item.exitCode !== null ? item.exitCode : '—';
+      metaRuntime.textContent = `${item.runtimeMs || 0}ms`;
+      metaRequestId.textContent = item.requestId || '—';
+      renderTerminalView();
+      document.querySelector('.tab-btn[data-tab="studio"]').click();
+      showToast(`Loaded historical run result (${item.jobId?.slice(0, 8)})`, 'info');
+    };
+
+    document.getElementById('btn-clear-history').addEventListener('click', () => {
+      sessionHistory.length = 0;
+      renderHistoryTable();
+      showToast('Session history cleared', 'info');
     });
 
-    // ================================================================
-    // Fetch Result
-    // ================================================================
-
-    /**
-     * @param {string} jobId
-     * @returns {Promise<void>}
-     */
-    async function fetchResult(jobId) {
-      try {
-        const resultRes = await apiFetch('/result/' + jobId);
-        if (!resultRes.ok) {
-          if (resultRes.status === 404) {
-            showError('Result not found — the job may have failed without producing output.');
-            return;
-          }
-          throw new Error('Failed to fetch result (' + resultRes.status + ')');
-        }
-
-        const data = await resultRes.json();
-
-        renderResult(data);
-
-      } catch (/** @type {unknown} */ err) {
-        showError('Error fetching result: ' + (err instanceof Error ? err.message : String(err)));
-      }
-    }
-
-    // ================================================================
-    // Utilities
-    // ================================================================
-
-    /**
-     * @param {string} str
-     * @returns {string}
-     */
-    function escapeHtml(str) {
-      const div = document.createElement('div');
-      div.textContent = str;
-      return div.innerHTML;
-    }
+    // Start App
+    init();
   </script>
 </body>
 </html>

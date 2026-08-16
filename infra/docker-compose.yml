@@ -11,7 +11,7 @@ services:
   postgres:
     image: postgres:16-alpine
     ports:
-      - '5434:5432'
+      - '5439:5432'
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -26,7 +26,7 @@ services:
     working_dir: /app
     command: node worker/index.js
     environment:
-      API_KEY: development-key
+      API_KEY: ${API_KEY:-test-api-key-dev-only}
       REDIS_URL: redis://redis:6379
       PG_HOST: postgres
       PG_PORT: 5432
@@ -34,8 +34,9 @@ services:
       PG_PASSWORD: postgres
       PG_DATABASE: code_exec
       WORKER_ID: ${HOSTNAME:-worker}
+      HOST_CODE_DIR: ${PWD}/../tmp
     volumes:
-      - ..:/app:ro
+      - ..:/app
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - redis
@@ -49,7 +50,7 @@ services:
     working_dir: /app
     command: node worker/watchdog.js
     environment:
-      API_KEY: development-key
+      API_KEY: ${API_KEY:-test-api-key-dev-only}
       REDIS_URL: redis://redis:6379
       PG_HOST: postgres
       PG_PORT: 5432

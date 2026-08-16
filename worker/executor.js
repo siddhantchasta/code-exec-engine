@@ -89,16 +89,25 @@ async function execute(code, languageOrSubmissionId, submissionId) {
     throw new TypeError(`unsupported language: ${language}`);
   }
 
-  const codePath = path.join(os.tmpdir(), `${id}-${languageConfig.fileName}`);
-  fs.writeFileSync(codePath, code, 'utf-8');
+  const tmpDir = path.resolve(__dirname, '../tmp');
+  if (!fs.existsSync(tmpDir)) {
+    fs.mkdirSync(tmpDir, { recursive: true });
+  }
+  const fileName = `${id}-${languageConfig.fileName}`;
+  const localCodePath = path.join(tmpDir, fileName);
+  fs.writeFileSync(localCodePath, code, 'utf-8');
   logger.info({ submissionId: id, language }, 'execution started');
+
+  const hostCodePath = process.env.HOST_CODE_DIR
+    ? path.join(process.env.HOST_CODE_DIR, fileName)
+    : localCodePath;
 
   /** @type {import('dockerode').Container | undefined} */
   let container;
   const startTime = Date.now();
 
   try {
-    container = await containerManager.createContainer(codePath, language);
+    container = await containerManager.createContainer(hostCodePath, language);
     await containerManager.startContainer(container);
 
     if (languageConfig.compile) {
@@ -165,7 +174,7 @@ async function execute(code, languageOrSubmissionId, submissionId) {
       }
     }
     try {
-      fs.unlinkSync(codePath);
+      fs.unlinkSync(localCodePath);
     } catch (/** @type {unknown} */ err) {
       if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') return;
       logger.error({ submissionId: id, err }, 'failed to clean up temp file');

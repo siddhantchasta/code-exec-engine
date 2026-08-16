@@ -69,7 +69,7 @@ async function insertResult(submissionId, result) {
  */
 async function getResult(submissionId) {
   const { rows } = await db.query(
-    `SELECT * FROM execution_results WHERE submission_id = $1`,
+    `SELECT r.*, s.status FROM execution_results r JOIN submissions s ON r.submission_id = s.id WHERE r.submission_id = $1`,
     [submissionId],
   );
   return rows[0] ?? null;

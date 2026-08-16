@@ -34,6 +34,16 @@ async function recoverOrphanedJobs(redisClient = redis, dependencies = { queue, 
     if (!record) {
       await redisClient.hdel(PROCESSING, jobId);
       await redisClient.lpush(DLQ, jobId);
+      const fallbackResult = {
+        stdout: '',
+        stderr: 'Job moved to DLQ: invalid processing record',
+        compileStdout: '',
+        compileStderr: '',
+        exitCode: 1,
+        timedOut: false,
+        runtimeMs: 0,
+      };
+      await dependencies.repository.insertResult(jobId, fallbackResult).catch(() => null);
       await dependencies.repository.updateSubmissionStatus(jobId, 'failed');
       return;
     }
@@ -58,6 +68,16 @@ async function recoverOrphanedJobs(redisClient = redis, dependencies = { queue, 
         .hset(job(jobId), 'status', 'failed', 'retryCount', String(retryCount))
         .lpush(DLQ, jobId)
         .exec();
+      const fallbackResult = {
+        stdout: '',
+        stderr: 'Job moved to DLQ: worker crashed and max retries exceeded',
+        compileStdout: '',
+        compileStderr: '',
+        exitCode: 1,
+        timedOut: false,
+        runtimeMs: 0,
+      };
+      await dependencies.repository.insertResult(jobId, fallbackResult).catch(() => null);
       await dependencies.repository.updateSubmissionStatus(jobId, 'failed');
       logger.warn({ jobId, workerId: record.workerId, retryCount }, 'orphaned job moved to DLQ');
       return;

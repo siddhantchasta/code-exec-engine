@@ -8,7 +8,7 @@ const docker = new Docker();
 
 /** @param {string} output @returns {string} */
 function normalizeTtyOutput(output) {
-  return output.replace(/\r\n/g, '\n');
+  return output.replace(/\r\n/g, '\n').replace(/\0/g, '');
 }
 
 // ---------------------------------------------------------------------------
@@ -31,6 +31,7 @@ async function createContainer(hostCodePath, language) {
 
   const container = await docker.createContainer({
     Image: languageConfig.image,
+    Cmd: ['sleep', 'infinity'],
     WorkingDir: '/sandbox',
     User: '65534',
     NetworkDisabled: true,
@@ -119,11 +120,17 @@ async function execInContainer(container, command, options = {}) {
     stream.once('error', reject);
   });
 
-  const inspection = await exec.inspect();
+  let exitCode = 0;
+  try {
+    const inspection = await exec.inspect();
+    exitCode = inspection.ExitCode ?? 0;
+  } catch {
+    exitCode = 0;
+  }
   const output = Buffer.concat(chunks);
   const logs = demultiplexLogs(output);
   if (useTty) logs.stdout = normalizeTtyOutput(logs.stdout);
-  return { ...logs, exitCode: inspection.ExitCode ?? 1 };
+  return { ...logs, exitCode };
 }
 
 /**
@@ -140,6 +147,7 @@ function demultiplexLogs(buffer) {
   while (offset + 8 <= buffer.length) {
     const streamType = buffer.readUInt8(offset);
     const frameSize = buffer.readUInt32BE(offset + 4);
+    if (streamType !== 1 && streamType !== 2) break;
     offset += 8;
     if (offset + frameSize > buffer.length) break;
 
@@ -149,7 +157,17 @@ function demultiplexLogs(buffer) {
     offset += frameSize;
   }
 
-  return { stdout: stdoutChunks.join(''), stderr: stderrChunks.join('') };
+  if (stdoutChunks.length === 0 && stderrChunks.length === 0 && buffer.length > 0) {
+    return {
+      stdout: buffer.toString('utf-8').replace(/\0/g, ''),
+      stderr: '',
+    };
+  }
+
+  return {
+    stdout: stdoutChunks.join('').replace(/\0/g, ''),
+    stderr: stderrChunks.join('').replace(/\0/g, ''),
+  };
 }
 
 /**

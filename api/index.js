@@ -32,6 +32,7 @@ app.use(express.json());
 
 // Serve demo UI from public/ — before auth so HTML loads without API key
 app.use(express.static('public'));
+app.get('/favicon.ico', (_req, res) => res.status(204).end());
 
 // GET /metrics — mount before auth so Prometheus scraper needs no API key
 const preAuthRouter = express.Router();

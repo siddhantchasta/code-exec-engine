@@ -125,8 +125,29 @@ async function main() {
         const jobData = await redis.hgetall(job(jobId));
         if (!jobData.code) {
           logger.error({ jobId, workerId: config.WORKER_ID }, 'job hash missing or has no code field');
-          await redis.hset(job(jobId), 'status', 'failed');
+          const fallbackResult = {
+            stdout: '',
+            stderr: 'Job payload missing or lost in queue',
+            compileStdout: '',
+            compileStderr: '',
+            exitCode: 1,
+            timedOut: false,
+            runtimeMs: 0,
+          };
+          await repository.insertResult(jobId, fallbackResult).catch(() => null);
           await repository.updateSubmissionStatus(jobId, 'failed');
+          await redis.hset(job(jobId), 'status', 'failed');
+          await redis.hset(
+            result(jobId),
+            'status', 'failed',
+            'stdout', fallbackResult.stdout,
+            'stderr', fallbackResult.stderr,
+            'compileStdout', '',
+            'compileStderr', '',
+            'exitCode', '1',
+            'runtimeMs', '0',
+            'timedOut', 'false',
+          ).catch(() => null);
           return;
         }
         const requestId = jobData.requestId || 'unknown';

@@ -31,6 +31,7 @@ function mount(router) {
 
     res.status(200).json({
       submissionId: row.submission_id,
+      status: row.status,
       stdout: row.stdout,
       stderr: row.stderr,
       compileStdout: row.compile_stdout,
