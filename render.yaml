@@ -58,5 +58,5 @@ databases:
     plan: free
     region: oregon
     databaseName: code_exec
-    user: postgres
+    user: code_exec_user
     postgresMajorVersion: "16"
