@@ -1445,6 +1445,15 @@ int main() {
     // Initialization
     // ---------------------------------------------------------------------------
     function init() {
+      // Restore API key if previously saved
+      const savedKey = localStorage.getItem('code_exec_api_key');
+      if (savedKey) {
+        apiKeyInput.value = savedKey;
+      }
+      apiKeyInput.addEventListener('input', () => {
+        localStorage.setItem('code_exec_api_key', apiKeyInput.value.trim());
+      });
+
       // Set initial editor content
       codeEditor.value = TEMPLATES.python;
       updateLineNumbers();
