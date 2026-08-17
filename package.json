@@ -12,6 +12,7 @@
     "test:websocket": "node api/websocket.test.js",
     "test:rate-limiter": "node lib/rate-limiter.test.js",
     "test:watchdog": "node worker/watchdog.test.js",
+    "test:stage-c": "node test-stage-c.js",
     "test:stage2": "node test-stage-2.js",
     "test:stage3": "node test-stage-3.js",
     "test:stage4": "node test-stage-4.js",
