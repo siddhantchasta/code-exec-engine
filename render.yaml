@@ -48,7 +48,9 @@ services:
     plan: free
     region: oregon
     maxmemoryPolicy: noeviction
-    ipAllowList: []
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: Allow external worker connections
 
 # ---------------------------------------------------------------------------
 # 3. PostgreSQL 16 Managed Database (Submissions & Execution Results)
