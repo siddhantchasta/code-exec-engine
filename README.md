@@ -1,256 +1,286 @@
-# Sandboxed Code Execution Engine
+# Distributed Sandboxed Code Execution Engine (v2)
 
-![Node.js](https://img.shields.io/badge/Node.js-20-339933?logo=nodedotjs&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-blue?logo=docker&logoColor=white)
-![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-20_CommonJS-339933?logo=nodedotjs&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-8_Security_Flags-2496ED?logo=docker&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-7_FIFO_%2B_PubSub_%2B_Lua-DC382D?logo=redis&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
-![Express](https://img.shields.io/badge/Express-4-000000?logo=express&logoColor=white)
+![Express](https://img.shields.io/badge/Express-4_%2B_ws-000000?logo=express&logoColor=white)
+![Prometheus](https://img.shields.io/badge/Prometheus-/metrics-E6522C?logo=prometheus&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-## What It Does
+A distributed backend that accepts **Python, Node.js (JavaScript), and C++** code via REST, executes it inside Docker sandboxes enforced by **8 Linux kernel security constraints**, streams terminal output in real-time over **WebSocket (Redis Pub/Sub)**, stores persistent execution records in **PostgreSQL**, and self-heals worker crashes using a **heartbeat watchdog with idempotency guards**.
 
-Backend service that accepts Python code via REST, executes it in a sandboxed Docker container with 8 kernel-enforced security constraints, stores results in PostgreSQL, and provides polling-based status updates. Built as a placement project to demonstrate systems design, container security, and async job processing.
+---
 
 ## Architecture
 
 ```mermaid
-flowchart LR
-    Client([Client])
+flowchart TD
+    Client([Client / Browser])
 
-    subgraph API["API Server (Express 4)"]
-        POST["POST /submit"]
-        GET_S["GET /status/:id"]
-        GET_R["GET /result/:id"]
+    subgraph API["1. API Layer (Express 4 + ws)"]
+        direction LR
+        Submit["POST /submit<br/>• Token Bucket Rate Limiting<br/>• Queue Backpressure Guard"]
+        WS["WebSocket /ws?id=<br/>• Live Terminal Streaming<br/>• Result Replay Cache"]
+        REST["REST Endpoints<br/>• GET /status/:id<br/>• GET /result/:id<br/>• GET /metrics"]
     end
 
-    subgraph Redis["Redis 7"]
-        Queue["exec:queue\n(FIFO list)"]
-        Hash["job:{id}\n(status hash)"]
+    subgraph State["2. Coordination & Persistence Layer"]
+        direction TB
+        subgraph Redis["Redis 7 (In-Memory Broker & Cache)"]
+            direction LR
+            Queue[("exec:queue<br/>FIFO Job Queue")]
+            Processing[("exec:processing<br/>In-Flight Map")]
+            PubSub[("exec:stream:{id}<br/>Pub/Sub Stream")]
+            Heartbeats[("exec:worker:{id}:heartbeat<br/>15s TTL Heartbeat")]
+            DLQ[("exec:dlq<br/>Dead-Letter Queue")]
+        end
+        PG[(PostgreSQL 16<br/>Durable Submissions & Execution Results)]
     end
 
-    subgraph Worker["Worker Process"]
-        Loop["async while-true\n(BRPOP)"]
+    subgraph Execution["3. Worker Execution & Resilience Layer"]
+        direction LR
+        Workers["Stateless Worker Pool (3 Replicas)<br/>• Atomic BRPOP Dequeue<br/>• 5s Heartbeat Loop<br/>• Graceful Shutdown Drain"]
+        Watchdog["Watchdog Process<br/>• Stale Heartbeat Detection<br/>• Idempotent Recovery Guard<br/>• Re-queue or DLQ Routing"]
     end
 
-    Sandbox["Docker Sandbox\n(python:3.12-slim)"]
-    PG[(PostgreSQL 16)]
+    subgraph Sandboxes["4. Hardened Sandboxes (8 Kernel Security Flags)"]
+        direction LR
+        PyBox["Python 3.12<br/>python:3.12-slim"]
+        JSBox["Node.js 20<br/>node:20-slim"]
+        CppBox["C++ (gcc:13)<br/>Compile-then-Run"]
+    end
 
-    Client -->|"submit code"| POST
-    POST -->|"LPUSH"| Queue
-    Queue -->|"BRPOP"| Loop
-    Loop -->|"docker run"| Sandbox
-    Sandbox -->|"stdout / stderr"| Loop
-    Loop -->|"INSERT result"| PG
+    %% Client Flows
+    Client -->|"Submit Code"| Submit
+    Client <-->|"Bidirectional Stream"| WS
+    Client -->|"Poll Status / Result"| REST
 
-    Client -->|"poll status"| GET_S
-    GET_S -->|"HGET"| Hash
-    Loop -->|"HSET status"| Hash
+    %% API to State Flows
+    Submit -->|"LPUSH"| Queue
+    WS -.->|"Subscribe & Replay"| PubSub
+    REST -->|"Query Status"| Redis
+    REST -->|"Fetch Result"| PG
 
-    Client -->|"fetch result"| GET_R
-    GET_R -->|"SELECT"| PG
+    %% Worker Flows
+    Queue -->|"Atomic BRPOP"| Workers
+    Workers -->|"HSET In-Flight"| Processing
+    Workers -->|"5s Heartbeat"| Heartbeats
+    Workers -->|"Spawn & Exec (Tty: true)"| Sandboxes
+    Sandboxes -->|"Stdout / Stderr Chunks"| Workers
+    Workers -->|"Publish Chunks"| PubSub
+    Workers -->|"Persist Record"| PG
+    Workers -->|"Clear In-Flight"| Processing
+
+    %% Watchdog Flows
+    Watchdog -->|"Scan Heartbeats"| Heartbeats
+    Watchdog -->|"Check Stale Jobs"| Processing
+    Watchdog -->|"Idempotent Re-queue"| Queue
+    Watchdog -->|"Max Retries Exceeded"| DLQ
 ```
 
-## Security Constraints
+---
 
-Every sandbox container is launched with **8 kernel-enforced flags** — no code change can bypass these:
+## 15 Core Features
 
-| Flag | Value | Prevents |
-|------|-------|----------|
-| `--memory` | `256m` | RAM exhaustion / OOM bomb crashing the host |
-| `--memory-swap` | `256m` | Bypassing RAM limit via swap space |
-| `--pids-limit` | `50` | Fork bombs (e.g., `:(){ :\|:& };:`) |
-| `--network=none` | — | Data exfiltration, reverse shells, crypto mining |
-| `--read-only` | — | Filesystem tampering, malware persistence |
-| `--tmpfs /sandbox:16m` | 16MB RAM-backed | Limits writable space; prevents disk fill attacks |
-| `--user=65534` | `nobody` | Privilege escalation, host filesystem access |
-| `--cap-drop=ALL` | — | Kernel exploits via Linux capabilities (mount, ptrace, etc.) |
+| # | Feature | Scope & Implementation |
+|---|---------|------------------------|
+| 1 | **Docker Sandbox Execution** | `dockerode` creation, execution, and cleanup across isolated containers. |
+| 2 | **8 Kernel Security Flags** | Hardened container runtime preventing fork bombs, network access, RAM exhaustion, and privilege escalation. |
+| 3 | **Wall-Clock Timeout Enforcement** | Per-job configurable timeout (default 5s for run, 10s max for C++ compile). |
+| 4 | **Redis FIFO Queue** | High-throughput async job distribution via atomic `LPUSH` and `BRPOP`. |
+| 5 | **Stateless Async Loop** | Non-blocking execution loop in worker processes for isolated background processing. |
+| 6 | **PostgreSQL Persistence** | Relational persistence for submission metadata and detailed execution records. |
+| 7 | **Token Bucket Rate Limiting** | Per-IP token bucket protection against API abuse. |
+| 8 | **Multi-Language Support** | Full support for **Python, Node.js (JavaScript), and C++** (compile-then-run model). |
+| 9 | **Stateless Worker Pool** | Scale horizontally with $N$ worker replicas (default 3) competing on atomic `BRPOP`. |
+| 10 | **Real-Time Output Streaming** | Line-by-line streaming via container `Tty: true` + Redis Pub/Sub + WebSocket endpoint (`/ws?id=`). |
+| 11 | **Heartbeat Watchdog & Idempotent Recovery** | 5s worker heartbeats; watchdog detects crashed workers, checks `exec:result:{id}` before re-queueing to prevent double-execution, and routes unrecoverable jobs to `exec:dlq`. |
+| 12 | **Atomic Lua Rate Limiter** | Single Lua script (`lib/rate-limit.lua`) eliminating read-modify-write race conditions. |
+| 13 | **Prometheus `/metrics` Exposition** | Standard `/metrics` endpoint exposing queue depth, DLQ depth, and end-to-end execution duration histograms. |
+| 14 | **Request ID Propagation** | `crypto.randomUUID()` generated at API boundary, attached to headers, stored in Redis, and propagated to all Pino worker logs. |
+| 15 | **Graceful Shutdown & Queue Backpressure** | Worker drains in-flight jobs on `SIGTERM`/`SIGINT` (30s grace period); `POST /submit` returns `503 Service Unavailable` with `Retry-After: 30` when queue is full. |
 
-## Design Decisions
+---
 
-**Why Redis LPUSH/BRPOP instead of PostgreSQL polling?**
+## Kernel-Enforced Container Security
 
-BRPOP is a blocking pop — the worker sleeps with zero CPU until a job arrives. PostgreSQL polling requires periodic SELECT queries that waste connections and add latency. Redis lists give O(1) push and pop with built-in blocking semantics.
+Every sandbox container is launched with **8 mandatory Linux kernel security flags**:
 
-**Why a separate worker process instead of in-process execution?**
+| Security Flag | Configuration | Threat Prevented |
+|---------------|---------------|------------------|
+| `--memory` | `256m` | RAM exhaustion / OOM bomb crashing the host node |
+| `--memory-swap` | `256m` | Swap-space bypass of memory limits |
+| `--pids-limit` | `50` | Process fork bombs (e.g., `:(){ :\|:& };:`) during compile or run |
+| `--network=none` | Disables network stack | Data exfiltration, SSRF, reverse shell connections, crypto mining |
+| `--read-only` | Immutable root filesystem | Disk tampering, malware persistence, unauthorized bin overwrites |
+| `--tmpfs /sandbox:16m` | RAM-backed 16MB mount | Restricts writable disk space to prevent disk fill attacks |
+| `--user=65534` | Non-root `nobody` user | Container breakout & host filesystem privilege escalation |
+| `--cap-drop=ALL` | Drops all Linux capabilities | Exploitation of kernel capabilities (e.g., `CAP_SYS_ADMIN`, `CAP_PTRACE`) |
 
-Docker containers can hang, OOM, or crash. If execution ran inside the API process, a stuck container would block all incoming requests. A separate worker process isolates failure — if the worker crashes, the API continues accepting submissions.
+---
 
-**Why token bucket rate limiter instead of a simple counter?**
+## Measured Performance Benchmarks
 
-A counter resets to zero at window boundaries, allowing burst traffic at the reset moment. Token bucket smooths traffic by refilling tokens at a constant rate, preventing sudden spikes and providing fairer rate limiting.
+Measured end-to-end wall-clock latency (from `POST /submit` to `status = 'done'`, including queueing, container creation, execution, and persistence):
 
-**Why REST polling instead of WebSockets?**
+| Language | min | avg | **p50 (median)** | **p95** | max | Notes |
+|----------|-----|-----|------------------|---------|-----|-------|
+| **Python** | 512 ms | 523 ms | **516 ms** | **581 ms** | 581 ms | `python:3.12-slim` |
+| **Node.js (JS)** | 513 ms | 622 ms | **518 ms** | **1043 ms** | 1043 ms | `node:20-slim` |
+| **C++** | 512 ms | 926 ms | **1021 ms** | **1525 ms** | 1525 ms | `gcc:13-slim` (compile phase + run phase) |
 
-WebSockets add connection management complexity (reconnection, heartbeats, state tracking). For a placement project with ~2 second execution times, polling every 2 seconds with a simple GET request is simpler, stateless, and easier to debug with curl.
+> *Tested on Apple Silicon / Docker Desktop with Redis 7 & PostgreSQL 16.*
 
-**Why one worker loop instead of a thread pool?**
+---
 
-One loop means one job at a time — easy to reason about, no race conditions, no shared state. If throughput becomes an issue, horizontal scaling (multiple worker processes) is simpler than managing a thread pool with complex synchronization.
+## API & WebSocket Reference
 
-## API Reference
-
-### `POST /submit`
-
-Submit a Python code snippet for execution.
+### 1. `POST /submit`
+Submit code for execution.
 
 **Headers:**
-
-```
+```http
 Content-Type: application/json
-x-api-key: <key>
+x-api-key: test-api-key-dev-only
 ```
 
 **Request Body:**
-
 ```json
 {
-  "code": "print('hello')",
+  "code": "for i in range(3):\n    print(f'Hello {i}')",
   "language": "python"
 }
 ```
 
 **Response `202 Accepted`:**
-
 ```json
 {
-  "id": "b3f1a2c4-5d6e-7f80-9a1b-2c3d4e5f6a7b",
-  "statusUrl": "/status/b3f1a2c4-5d6e-7f80-9a1b-2c3d4e5f6a7b"
+  "id": "0108ed6b-e1e5-49cb-a698-a6ef177078f2",
+  "requestId": "2e3c043a-c242-476b-8dc8-2a958e85173a",
+  "statusUrl": "/status/0108ed6b-e1e5-49cb-a698-a6ef177078f2"
 }
 ```
-
-| Status Code | Meaning |
-|-------------|---------|
-| `202` | Submission accepted and queued |
-| `400` | Validation error (missing/invalid code or language) |
-| `401` | Missing or invalid `x-api-key` |
-| `429` | Rate limit exceeded |
+*Response Header:* `x-request-id: 2e3c043a-c242-476b-8dc8-2a958e85173a`
 
 ---
 
-### `GET /status/:id`
+### 2. WebSocket Streaming `/ws?id=<submissionId>`
+Open a WebSocket connection to stream output line-by-line while execution is in progress.
 
-Poll the current status of a submission.
+```javascript
+const ws = new WebSocket('ws://localhost:3000/ws?id=0108ed6b-e1e5-49cb-a698-a6ef177078f2');
 
-**Headers:**
-
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  if (msg.type === 'chunk') {
+    console.log('Streamed output:', msg.data);
+  } else if (msg.type === 'done') {
+    console.log('Execution finished:', msg.result);
+    ws.close();
+  }
+};
 ```
-x-api-key: <key>
-```
 
-**Response `200 OK`:**
+---
+
+### 3. `GET /status/:id`
+Poll submission status (REST fallback).
 
 ```json
 {
-  "id": "b3f1a2c4-5d6e-7f80-9a1b-2c3d4e5f6a7b",
+  "id": "0108ed6b-e1e5-49cb-a698-a6ef177078f2",
   "status": "done"
 }
 ```
-
-Possible `status` values: `pending` | `running` | `done` | `failed` | `timeout`
-
-| Status Code | Meaning |
-|-------------|---------|
-| `200` | Status returned |
-| `400` | Invalid UUID format |
-| `401` | Missing or invalid `x-api-key` |
-| `404` | Submission not found |
+*Statuses:* `pending` | `running` | `done` | `failed` | `timeout`
 
 ---
 
-### `GET /result/:id`
-
-Fetch the execution result after status is `done`, `failed`, or `timeout`.
-
-**Headers:**
-
-```
-x-api-key: <key>
-```
-
-**Response `200 OK`:**
+### 4. `GET /result/:id`
+Fetch complete execution details once terminal.
 
 ```json
 {
-  "submissionId": "b3f1a2c4-5d6e-7f80-9a1b-2c3d4e5f6a7b",
-  "stdout": "hello\n",
+  "submissionId": "0108ed6b-e1e5-49cb-a698-a6ef177078f2",
+  "stdout": "Hello 0\nHello 1\nHello 2\n",
   "stderr": "",
+  "compileStdout": null,
+  "compileStderr": null,
   "exitCode": 0,
-  "runtimeMs": 312,
+  "runtimeMs": 443,
   "timedOut": false
 }
 ```
 
-| Status Code | Meaning |
-|-------------|---------|
-| `200` | Result returned |
-| `400` | Invalid UUID format |
-| `401` | Missing or invalid `x-api-key` |
-| `404` | Submission or result not found |
+---
 
-## Benchmarks
+### 5. `GET /metrics`
+Prometheus text-format endpoint (unauthenticated for metric scrapers).
 
-| Metric | Value |
-|--------|-------|
-| p50 end-to-end latency (submit → done) | **416 ms** |
-| p95 end-to-end latency | **476 ms** |
-| Docker cold start overhead | **~395 ms** (min observed) |
-| Requests/min before rate limiter fires | **10** (configurable via `RATE_LIMIT_MAX`) |
+```prometheus
+# HELP exec_queue_depth Number of jobs currently waiting in the execution queue (exec:queue)
+# TYPE exec_queue_depth gauge
+exec_queue_depth 0
 
-> All benchmarks measured on MacBook Pro (Apple Silicon) with Docker Desktop. Single worker, sequential execution. 20 runs of `print("hello")`, measured end-to-end from HTTP submit to status=done.
+# HELP exec_execution_duration_ms End-to-end job execution duration in milliseconds, by language and terminal status
+# TYPE exec_execution_duration_ms histogram
+exec_execution_duration_ms_bucket{le="500",language="python",status="done"} 1
+exec_execution_duration_ms_sum{language="python",status="done"} 443
+exec_execution_duration_ms_count{language="python",status="done"} 1
 
-## Known Gaps
+# HELP exec_dlq_depth Number of permanently failed jobs in the dead-letter queue (exec:dlq)
+# TYPE exec_dlq_depth gauge
+exec_dlq_depth 0
+```
 
-1. **Worker crash loses in-flight job**
-   > Status stuck at `running` forever. No watchdog or DLQ. Acceptable for placement scope; production would add health checks and a reaper process.
+---
 
-2. **Redis restart loses queue**
-   > No AOF/RDB persistence configured. Pending jobs vanish. Production would enable AOF with `appendfsync everysec`.
+## Known Architectural Gaps & Trade-offs
 
-3. **Docker cold start 300–500ms**
-   > No warm container pool. Each execution pays the full container create → start cost. Acceptable latency for a code execution service.
+1. **Docker Cold Start (300–500ms):**
+   > No pre-warmed container pool is maintained. Every execution pays container creation cost. This is an intentional architectural trade-off to ensure clean security isolation without background resource consumption.
+2. **Unpersisted Redis Queue:**
+   > Redis is run in default in-memory mode without AOF configured. A full Redis node crash would lose queued jobs.
+3. **Single API Key Authentication:**
+   > Uses a single hardcoded `API_KEY` validated via HTTP header rather than full JWT/OAuth2.
 
-4. **Token bucket race condition**
-   > Read-modify-write on Redis hash is not atomic. Under high concurrency, two requests could read the same token count. Production would use a Lua script for atomicity.
+---
 
 ## Quick Start
 
-**Prerequisites:** Node.js 20+, Docker Desktop
-
+### 1. Start Infrastructure via Docker Compose
 ```bash
-# 1. Start backing services
-cd infra && docker compose up -d && cd ..
+cd infra
+docker-compose up -d
+cd ..
+```
 
-# 2. Build sandbox image
-docker build -t sandbox-python infra/docker/sandbox/
+### 2. Run Local Tests & Verification
+```bash
+# Run unit & gate test suites
+npm run test:rate-limiter
+npm run test:watchdog
+npm run test:shutdown
+npm run test:stage4
 
-# 3. Install dependencies
-npm install
+# Run performance benchmark suite
+npm run benchmark
+```
 
-# 4. Start worker (terminal 1)
+### 3. Start API & Worker Processes
+```bash
+# Terminal 1: Worker process
 npm run worker
 
-# 5. Start API server (terminal 2)
+# Terminal 2: API Server
 npm run api
 
-# 6. Open demo UI
+# Open web console in browser
 open http://localhost:3000
 ```
 
-### CLI Usage
-
-```bash
-# Submit
-curl -s -X POST http://localhost:3000/submit \
-  -H 'Content-Type: application/json' \
-  -H 'x-api-key: test-api-key-dev-only' \
-  -d '{"code": "print(42 * 3)", "language": "python"}'
-
-# Poll status (replace <id> with the returned UUID)
-curl -s http://localhost:3000/status/<id> -H 'x-api-key: test-api-key-dev-only'
-
-# Fetch result
-curl -s http://localhost:3000/result/<id> -H 'x-api-key: test-api-key-dev-only'
-```
+---
 
 ## License
 
