@@ -1,0 +1,62 @@
+# Render Blueprint — Distributed Code Execution Engine
+# Deploy API Web Service, Managed PostgreSQL, and Managed Redis
+
+services:
+  # ---------------------------------------------------------------------------
+  # 1. API Web Service (Express 4 + WebSocket + Prometheus /metrics + Web Console)
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: code-exec-api
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install && npm run db:init
+    startCommand: npm run start
+    healthCheckPath: /metrics
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: API_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: code-exec-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: code-exec-redis
+          property: connectionString
+      - key: RATE_LIMIT_MAX
+        value: "20"
+      - key: RATE_LIMIT_WINDOW
+        value: "60"
+      - key: MAX_QUEUE_DEPTH
+        value: "100"
+      - key: EXECUTION_TIMEOUT_MS
+        value: "5000"
+      - key: CPP_COMPILE_TIMEOUT_MS
+        value: "10000"
+      - key: LOG_LEVEL
+        value: info
+
+  # ---------------------------------------------------------------------------
+  # 2. Redis 7 Key-Value Store (FIFO Queue, Pub/Sub, Heartbeats, Token Bucket)
+  # ---------------------------------------------------------------------------
+  - type: redis
+    name: code-exec-redis
+    plan: free
+    region: oregon
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+
+# ---------------------------------------------------------------------------
+# 3. PostgreSQL 16 Managed Database (Submissions & Execution Results)
+# ---------------------------------------------------------------------------
+databases:
+  - name: code-exec-db
+    plan: free
+    region: oregon
+    databaseName: code_exec
+    user: postgres
+    postgresMajorVersion: "16"

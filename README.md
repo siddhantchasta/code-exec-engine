@@ -247,38 +247,66 @@ exec_dlq_depth 0
 
 ---
 
-## Quick Start
+## Quick Start & Service Orchestration
 
-### 1. Start Infrastructure via Docker Compose
+### 1. Start Core Infrastructure (Redis & PostgreSQL)
 ```bash
 cd infra
-docker-compose up -d
+docker-compose up -d redis postgres
 cd ..
 ```
 
-### 2. Run Local Tests & Verification
+### 2. Start Application Processes
 ```bash
-# Run unit & gate test suites
-npm run test:rate-limiter
-npm run test:watchdog
-npm run test:shutdown
-npm run test:stage4
+# Terminal 1: API Server (Express + WebSocket + /metrics)
+npm run api
 
-# Run performance benchmark suite
-npm run benchmark
-```
-
-### 3. Start API & Worker Processes
-```bash
-# Terminal 1: Worker process
+# Terminal 2: Worker Process (or run 3 replicas via Docker Compose)
 npm run worker
 
-# Terminal 2: API Server
-npm run api
+# Terminal 3 (Optional): Watchdog Process (Heartbeat Scanner)
+npm run watchdog
 
 # Open web console in browser
 open http://localhost:3000
 ```
+
+---
+
+## Deploy to Render (1-Click Blueprint)
+
+This engine includes a ready-to-use Render Blueprint specification (`render.yaml`) that provisions the API Web Service, Managed PostgreSQL 16 database, and Managed Redis 7 key-value cluster.
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+
+### Manual Blueprint Deployment Steps:
+1. **Push your code** to a GitHub/GitLab repository.
+2. In the [Render Dashboard](https://dashboard.render.com), click **New +** and select **Blueprint**.
+3. Connect your repository containing `render.yaml`.
+4. Render will automatically configure:
+   - **`code-exec-api`**: Web service running Express 4 + WebSocket server + `/metrics` + web console (with automatic `npm run db:init` build migration).
+   - **`code-exec-db`**: Managed PostgreSQL 16 database.
+   - **`code-exec-redis`**: Managed Redis 7 instance.
+5. Click **Apply** to deploy the infrastructure.
+6. Once deployed, open your public Render URL (e.g. `https://code-exec-api.onrender.com`) to access the web console and live streaming runner.
+
+> **Worker Execution Topology**:
+> Because Render containers operate in a multi-tenant sandboxed runtime without root `/var/run/docker.sock` access, your worker pool (`npm run worker` / Docker Compose) connects directly to Render's `REDIS_URL` and `DATABASE_URL` from any Docker-capable host (VPS, local node, or container runner) to execute jobs with all 8 kernel security constraints.
+
+---
+
+## Test & Acceptance Gate Verification
+
+Every architectural claim is backed by automated verification suites. Refer to the table below for required background services:
+
+| Test Suite | Command | Required Services / Terminals | What Is Verified |
+|---|---|---|---|
+| **Resilience & Concurrency (Stage C)** | `npm run test:stage-c` | `redis`, `postgres`, `npm run api` | 50 concurrent requests on Lua token bucket (0 over-allows), queue backpressure (503 + `Retry-After: 30`), kill -9 orphan recovery, watchdog idempotency result check, and DLQ escalation. |
+| **Graceful Shutdown** | `npm run test:shutdown` | `redis`, `postgres`, `npm run api`<br/>*(Stop standalone worker first)* | Submits 4s sleep job, sends `SIGTERM` to dedicated worker, verifies worker drains active container (~4s) and exits `0` cleanly. |
+| **Observability & REST (Stage D)** | `npm run test:stage4` | `redis`, `postgres`, `npm run api`, `npm run worker` | Request ID propagation (`x-request-id`), REST poll & result fetch, 401 auth rejection, Prometheus `/metrics` histogram observation, burst 429. |
+| **Multi-Language Sandboxes** | `npm run test:languages` | `redis`, `postgres`, `npm run worker` | Execution across Python 3.12, Node.js 20, and C++ (`gcc:13` compile phase + run phase). |
+| **WebSocket Real-Time Streaming** | `npm run test:websocket` | `redis`, `postgres`, `npm run api`, `npm run worker` | Live line-by-line chunk streaming via Redis Pub/Sub and late-client replay cache from `exec:result:{id}`. |
+
 
 ---
 

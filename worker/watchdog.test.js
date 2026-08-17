@@ -38,7 +38,10 @@ async function run() {
   const enqueued = [];
   const dependencies = {
     queue: { async enqueue(id) { enqueued.push(id); } },
-    repository: { async updateSubmissionStatus(id, status) { statuses.push([id, status]); } },
+    repository: {
+      async updateSubmissionStatus(id, status) { statuses.push([id, status]); },
+      async insertResult() {},
+    },
   };
 
   const retryRedis = new FakeRedis(staleRecord);

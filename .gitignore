@@ -1,9 +1,11 @@
 docs/*
+!docs/schema.sql
 graphify-out/*
 node_modules/*
 AGENTS.md
 CLAUDE.md
 Makefile
 scripts/*
+!scripts/init-db.js
 .env
 .agents

@@ -4,6 +4,8 @@
   "private": true,
   "description": "Sandboxed Python code execution engine",
   "scripts": {
+    "start": "node api/index.js",
+    "db:init": "node scripts/init-db.js",
     "api": "node api/index.js",
     "worker": "node worker/index.js",
     "watchdog": "node worker/watchdog.js",
