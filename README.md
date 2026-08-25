@@ -271,28 +271,16 @@ npm run watchdog
 open http://localhost:3000
 ```
 
----
+### 3. Production Deployment with Docker Compose
+To run all services (Express API, 3 worker replicas, Redis, PostgreSQL, and Watchdog) in production:
+```bash
+# 1. Build sandbox isolation images
+npm run build:sandboxes
 
-## Deploy to Render (1-Click Blueprint)
-
-This engine includes a ready-to-use Render Blueprint specification (`render.yaml`) that provisions the API Web Service, Managed PostgreSQL 16 database, and Managed Redis 7 key-value cluster.
-
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
-
-### Manual Blueprint Deployment Steps:
-1. **Push your code** to a GitHub/GitLab repository.
-2. In the [Render Dashboard](https://dashboard.render.com), click **New +** and select **Blueprint**.
-3. Connect your repository containing `render.yaml`.
-4. Render will automatically configure:
-   - **`code-exec-api`**: Web service running Express 4 + WebSocket server + `/metrics` + web console (with automatic `npm run db:init` build migration).
-   - **`code-exec-db`**: Managed PostgreSQL 16 database.
-   - **`code-exec-redis`**: Managed Redis 7 instance.
-5. Click **Apply** to deploy the infrastructure.
-6. Once deployed, open your public Render URL (e.g. `https://code-exec-api.onrender.com`) to access the web console and live streaming runner.
-
-> **Worker Execution Topology**:
-> Because Render containers operate in a multi-tenant sandboxed runtime without root `/var/run/docker.sock` access, your worker pool (`npm run worker` / Docker Compose) connects directly to Render's `REDIS_URL` and `DATABASE_URL` from any Docker-capable host (VPS, local node, or container runner) to execute jobs with all 8 kernel security constraints.
-
+# 2. Launch the complete distributed engine
+cd infra
+docker compose up -d
+```
 ---
 
 ## Test & Acceptance Gate Verification
